@@ -20,6 +20,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     ".onrender.com",  # allow all subdomains of onrender.com
     "dashboard.breneo.app" # Our domain
+    "http://localhost:8081",
 ]
 
 # ---------------------------
