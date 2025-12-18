@@ -5,6 +5,7 @@ from pathlib import Path
 # BASE DIRECTORY
 # ---------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
+CORS_ALLOW_ALL_ORIGINS = True
 
 # ---------------------------
 # SECURITY
@@ -18,6 +19,7 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     ".onrender.com",  # allow all subdomains of onrender.com
+    "dashboard.breneo.app" # Our domain
 ]
 
 # ---------------------------
@@ -37,6 +39,8 @@ INSTALLED_APPS = [
 
     # Your apps
     'jobs',
+    
+    'corsheaders',
 ]
 
 # ---------------------------
@@ -50,6 +54,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 # ---------------------------
