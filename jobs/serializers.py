@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Job, Company
+from .models import Job
 from datetime import datetime
 
 
@@ -7,18 +7,11 @@ class JobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'location',
+            'id', 'title', 'company',  "company_logo",  'location',
             'description', 'apply_url', 'platform',
             'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
-
-
-class CompanySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Company
-        fields = ['id', 'name', 'platform', 'handle', 'logo', 'careers_url', 'created_at']
-        read_only_fields = ['id', 'created_at']
 
 
 def job_to_dict(job):
@@ -39,7 +32,7 @@ def job_to_dict(job):
             "raw": job.raw,
         }
     else:
-        # assume dict
+        # assume dict from fetcher
         return {
             "title": job.get("title"),
             "company": job.get("company"),
