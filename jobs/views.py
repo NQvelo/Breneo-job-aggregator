@@ -3,5 +3,7 @@ from .models import Job
 from .serializers import JobSerializer
 
 class JobListView(generics.ListAPIView):
-    queryset = Job.objects.all()
     serializer_class = JobSerializer
+
+    def get_queryset(self):
+        return Job.objects.all().order_by("?")

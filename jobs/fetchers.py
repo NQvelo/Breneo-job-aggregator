@@ -8,21 +8,23 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 HEADERS = {"User-Agent": "BreneoJobAggregator/1.0 (+https://yourdomain.example)"}
-
 LOGO_DEV_PUBLIC_KEY = "pk_K96TtQYUTvy3hHXDyIEUqw"
+BASE_URL = "https://jobs.ge"
+
 
 def safe_get(url, timeout=8):
     r = httpx.get(url, headers=HEADERS, timeout=timeout)
     r.raise_for_status()
     return r
 
+
 def get_logo_url(company_name: str, size=101) -> str:
     safe_name = company_name.replace(" ", "")
     return f"https://img.logo.dev/name/{safe_name}?token={LOGO_DEV_PUBLIC_KEY}&size={size}&retina=true"
 
 
-def fetch_greenhouse(handle, company_name):
-    logo = get_logo_url(company_name)
+def fetch_greenhouse(handle, company_name, logo=None):
+    logo = logo or get_logo_url(company_name)
     url = f"https://boards-api.greenhouse.io/v1/boards/{handle}/jobs"
     jobs = []
     try:
@@ -50,8 +52,8 @@ def fetch_greenhouse(handle, company_name):
     return jobs
 
 
-def fetch_lever(handle, company_name):
-    logo = get_logo_url(company_name)
+def fetch_lever(handle, company_name, logo=None):
+    logo = logo or get_logo_url(company_name)
     url = f"https://api.lever.co/v0/postings/{handle}?mode=json"
     jobs = []
     try:
@@ -79,8 +81,8 @@ def fetch_lever(handle, company_name):
     return jobs
 
 
-def fetch_workable(company_slug, company_name):
-    logo = get_logo_url(company_name)
+def fetch_workable(company_slug, company_name, logo=None):
+    logo = logo or get_logo_url(company_name)
     jobs = []
     try:
         rss_url = f"https://{company_slug}.workable.com/jobs.rss"
@@ -106,9 +108,9 @@ def fetch_workable(company_slug, company_name):
     return jobs
 
 
-def fetch_rss(feed_url, company_name):
+def fetch_rss(feed_url, company_name, logo=None):
     import feedparser
-    logo = get_logo_url(company_name)
+    logo = logo or get_logo_url(company_name)
     jobs = []
     try:
         feed = feedparser.parse(feed_url)
@@ -132,8 +134,8 @@ def fetch_rss(feed_url, company_name):
     return jobs
 
 
-def fetch_generic_career_page(list_url, company_name, selector=None):
-    logo = get_logo_url(company_name)
+def fetch_generic_career_page(list_url, company_name, logo=None, selector=None):
+    logo = logo or get_logo_url(company_name)
     jobs = []
     try:
         if not robots_allowed(list_url):
@@ -164,10 +166,9 @@ def fetch_generic_career_page(list_url, company_name, selector=None):
         logger.exception("Generic career page fetch failed for %s", list_url)
     return jobs
 
-BASE_URL = "https://jobs.ge"
-
 
 def fetch_jobs_ge_listings(list_url, company_name="Local Georgian", logo=None, limit=20):
+    logo = logo or get_logo_url(company_name)
     jobs = []
     try:
         if not robots_allowed(list_url):
@@ -199,20 +200,19 @@ def fetch_jobs_ge_listings(list_url, company_name="Local Georgian", logo=None, l
         logger.exception("jobs.ge fetch failed for %s", list_url)
     return jobs
 
-def fetch_ashby(handle: str, company_name: str):
+
+def fetch_ashby(handle: str, company_name: str, logo=None):
     """
     Fetch jobs from AshbyHQ
     Example: https://jobs.ashbyhq.com/notion
     """
     import httpx
-    logo = get_logo_url(company_name)
+    logo = logo or get_logo_url(company_name)
 
     url = f"https://jobs.ashbyhq.com/api/non-user-graphql"
     payload = {
         "operationName": "JobBoardWithTeams",
-        "variables": {
-            "organizationHostedJobsPageName": handle
-        },
+        "variables": {"organizationHostedJobsPageName": handle},
         "query": """
         query JobBoardWithTeams($organizationHostedJobsPageName: String!) {
           jobBoardWithTeams(
