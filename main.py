@@ -67,11 +67,21 @@ async def fetch_career_page_jobs(url: str, company: str) -> List[Job]:
 # ----------------------
 # API endpoint
 # ----------------------
+
+
+GREENHOUSE_COMPANIES = ["stripe", "airbnb", "doordash", "spacex", "cloudflare"]
+
+
 @app.get("/jobs", response_model=List[Job])
 async def get_jobs():
     all_jobs = []
-    # Example Greenhouse company
-    all_jobs.extend(await fetch_greenhouse_jobs("stripe"))
-    # Example career page (replace with actual URL)
+
+    # Fetch jobs from multiple Greenhouse companies
+    for company in GREENHOUSE_COMPANIES:
+        all_jobs.extend(await fetch_greenhouse_jobs(company))
+
+    # Example: Add generic career pages
     all_jobs.extend(await fetch_career_page_jobs("https://example.com/careers", "ExampleCorp"))
+
     return all_jobs
+

@@ -18,6 +18,8 @@ COMPANIES = [
     {"name": "Drift", "platform": "greenhouse", "handle": "drift", "logo": ""},
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom", "logo": ""},
     {"name": "Trello", "platform": "greenhouse", "handle": "trello", "logo": ""},
+    {"name": "Spotify", "platform": "greenhouse", "handle": "Spotify", "logo": ""},
+
 
     # Lever companies
     {"name": "Chipper", "platform": "lever", "handle": "chipper", "logo": ""},
@@ -25,6 +27,8 @@ COMPANIES = [
     {"name": "Gusto", "platform": "lever", "handle": "gusto", "logo": ""},
     {"name": "Lattice", "platform": "lever", "handle": "lattice", "logo": ""},
     {"name": "Notion", "platform": "lever", "handle": "notion", "logo": ""},
+    {"name": "Spotify", "platform": "lever", "handle": "Spotify", "logo": ""},
+
 
     # Workable companies
     {"name": "Typeform", "platform": "workable", "handle": "typeform", "logo": ""},
@@ -32,9 +36,9 @@ COMPANIES = [
     {"name": "Figma", "platform": "workable", "handle": "figma", "logo": ""},
     {"name": "Miro", "platform": "workable", "handle": "miro", "logo": ""},
     {"name": "Doist", "platform": "workable", "handle": "doist", "logo": ""},
+    {"name": "Spotify", "platform": "greenhouse", "handle": "Spotify", "logo": ""},
 
     # Generic career pages (any website with structured careers page)
-    {"name": "Breneo", "platform": "career_page", "url": "https://breneo.app/careers", "logo": ""},
     {"name": "Acme Corp", "platform": "career_page", "url": "https://example.com/careers", "logo": ""},
     {"name": "RemoteOK", "platform": "career_page", "url": "https://remoteok.com/remote-jobs", "logo": ""},
     {"name": "WeWorkRemotely", "platform": "career_page", "url": "https://weworkremotely.com/categories/remote-programming-jobs", "logo": ""},
@@ -51,6 +55,8 @@ PLATFORM_TO_FETCHER = {
     "jobs.ge": fetchers.fetch_jobs_ge_listings,
     "career_page": fetchers.fetch_generic_career_page,
     "ashby": fetchers.fetch_ashby,  
+    "rss": fetchers.fetch_rss,  # <-- RSS fetcher here
+
 }
 
 

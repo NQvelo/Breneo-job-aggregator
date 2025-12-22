@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from .utils import parse_date, robots_allowed
 import logging
 from urllib.parse import urljoin
+import feedparser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,6 +35,16 @@ def fetch_greenhouse(handle, company_name, logo=None):
             job_id = job.get("id")
             absolute_url = job.get("absolute_url") or f"https://boards.greenhouse.io/{handle}/jobs/{job_id}"
             content = job.get("content", "")
+            # If the API doesn't include content, attempt to fetch the job page HTML
+            if not content and absolute_url:
+                try:
+                    pg = safe_get(absolute_url)
+                    soup = BeautifulSoup(pg.text, "html.parser")
+                    desc_el = soup.select_one("div.content") or soup.select_one(".posting-description") or soup.select_one("#content")
+                    content = desc_el.get_text(separator="\n").strip() if desc_el else ""
+                except Exception:
+                    content = ""
+
             text_desc = BeautifulSoup(content or "", "html.parser").get_text(separator="\n").strip()
             jobs.append({
                 "title": job.get("title") or "",
@@ -239,11 +250,13 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
 
         postings = data["data"]["jobBoardWithTeams"]["jobPostings"]
         for j in postings:
+            html_desc = j.get("descriptionHtml") or ""
+            text_desc = BeautifulSoup(html_desc, "html.parser").get_text(separator="\n").strip() if html_desc else ""
             jobs.append({
                 "title": j["title"],
                 "company": company_name,
                 "location": j.get("locationName"),
-                "description": j.get("descriptionHtml"),
+                "description": text_desc,
                 "apply_url": j.get("externalLink"),
                 "external_job_id": j["id"],
                 "posted_at": j.get("postedAt"),
@@ -256,6 +269,26 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
 
     return jobs
 
+
+
+def fetch_rss(url, company_name=None):
+    """
+    Fetch jobs from RSS feed. Returns a list of dicts.
+    """
+    jobs = []
+    feed = feedparser.parse(url)
+    for entry in feed.entries:
+        jobs.append({
+            "title": entry.title,
+            "location": getattr(entry, "location", None),
+            "description": getattr(entry, "summary", ""),
+            "apply_url": entry.link,
+            "external_job_id": entry.id if hasattr(entry, "id") else entry.link,
+            "posted_at": getattr(entry, "published", None),
+            "raw": entry,
+            "logo": None,
+        })
+    return jobs
 
 # import httpx
 # from bs4 import BeautifulSoup
