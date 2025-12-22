@@ -62,6 +62,9 @@ class Job(models.Model):
 
     # Store company logo at the time of job fetch
     company_logo = models.URLField(blank=True, null=True)
+    
+    # Structured description data (parsed from description field)
+    structured_description = models.JSONField(blank=True, null=True, help_text="Parsed structured data from job description")
 
     class Meta:
         constraints = [
@@ -79,6 +82,15 @@ class Job(models.Model):
         # Auto-fill company_logo if empty
         if not self.company_logo and self.company and self.company.logo:
             self.company_logo = self.company.logo
+        
+        # Parse structured description if description exists and structured_description is empty
+        if self.description and not self.structured_description:
+            from .utils import parse_structured_description
+            try:
+                self.structured_description = parse_structured_description(self.description)
+            except Exception:
+                pass  # If parsing fails, continue without structured description
+        
         super().save(*args, **kwargs)
 
 

@@ -17,8 +17,6 @@ COMPANIES = [
     {"name": "Zapier", "platform": "greenhouse", "handle": "zapier", "logo": ""},
     {"name": "Drift", "platform": "greenhouse", "handle": "drift", "logo": ""},
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom", "logo": ""},
-    {"name": "Trello", "platform": "greenhouse", "handle": "trello", "logo": ""},
-    {"name": "Spotify", "platform": "greenhouse", "handle": "Spotify", "logo": ""},
 
 
     # Lever companies
@@ -33,16 +31,9 @@ COMPANIES = [
     # Workable companies
     {"name": "Typeform", "platform": "workable", "handle": "typeform", "logo": ""},
     {"name": "FrontApp", "platform": "workable", "handle": "frontapp", "logo": ""},
-    {"name": "Figma", "platform": "workable", "handle": "figma", "logo": ""},
     {"name": "Miro", "platform": "workable", "handle": "miro", "logo": ""},
     {"name": "Doist", "platform": "workable", "handle": "doist", "logo": ""},
-    {"name": "Spotify", "platform": "greenhouse", "handle": "Spotify", "logo": ""},
 
-    # Generic career pages (any website with structured careers page)
-    {"name": "Acme Corp", "platform": "career_page", "url": "https://example.com/careers", "logo": ""},
-    {"name": "RemoteOK", "platform": "career_page", "url": "https://remoteok.com/remote-jobs", "logo": ""},
-    {"name": "WeWorkRemotely", "platform": "career_page", "url": "https://weworkremotely.com/categories/remote-programming-jobs", "logo": ""},
-    {"name": "EuropeRemotely", "platform": "career_page", "url": "https://europeremotely.com/", "logo": ""},
 ]
 
 
