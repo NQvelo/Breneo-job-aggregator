@@ -17,6 +17,11 @@ COMPANIES = [
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom"},
     {"name": "Figma", "platform": "greenhouse", "handle": "figma"},
     {"name": "Spotify", "platform": "lever", "handle": "spotify"},
+    {"name": "Stripe", "platform": "greenhouse", "handle": "stripe"},
+    {"name": "Airbnb", "platform": "greenhouse", "handle": "airbnb"},
+    {"name": "DoorDash", "platform": "greenhouse", "handle": "doordash"},
+    {"name": "SpaceX", "platform": "greenhouse", "handle": "spacex"},
+    {"name": "Cloudflare", "platform": "greenhouse", "handle": "cloudflare"},
 ]
 
 # Map platform to fetcher function
