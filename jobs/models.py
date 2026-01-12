@@ -7,8 +7,8 @@ class Company(models.Model):
     # Optional domain (useful for enrichment / logo fetching)
     domain = models.CharField(max_length=200, blank=True, null=True)
 
-    # Logo URL (Logo.dev, Clearbit, etc.)
-    logo = models.URLField(blank=True, null=True)
+    # Logo URL (Logo.dev, etc.)
+    logo = models.URLField(blank=True, null=True, help_text="Company logo URL")
 
     # Primary ATS platform (greenhouse, lever, ashby, etc.)
     platform = models.CharField(
@@ -18,10 +18,50 @@ class Company(models.Model):
         help_text="Primary ATS platform (greenhouse, lever, ashby, etc.)",
     )
 
+    # Company description (short and simple, 2 sentences)
+    description = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Short company description (2 sentences)",
+        max_length=1000,
+    )
+
+    # Company website
+    website = models.URLField(blank=True, null=True, help_text="Company website URL")
+
+    # Founded date
+    founded_date = models.DateField(blank=True, null=True, help_text="Company founding date")
+
+    # Number of employees
+    employees_count = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Number of employees (e.g., '1-10', '11-50', '51-200', '201-500', '501-1000', '1000+')",
+    )
+
+    # Social links (stored as JSON)
+    social_links = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Social media links (e.g., {'linkedin': '...', 'twitter': '...', 'github': '...'})",
+        default=dict,
+    )
+
+    # Additional company details (stored as JSON for flexibility)
+    additional_details = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Additional company information (industry, headquarters, etc.)",
+        default=dict,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["name"]
+        verbose_name_plural = "Companies"
 
     def __str__(self):
         return self.name
@@ -38,7 +78,6 @@ class Job(models.Model):
 
     # Location fields
     location = models.CharField(max_length=200, blank=True, null=True)
-    location_country = models.CharField(max_length=100, blank=True, null=True)
 
     description = models.TextField(blank=True, null=True)
     apply_url = models.URLField(blank=True, null=True)
@@ -59,9 +98,6 @@ class Job(models.Model):
 
     # Raw API payload for debugging / enrichment
     raw = models.JSONField(blank=True, null=True)
-
-    # Store company logo at the time of job fetch
-    company_logo = models.URLField(blank=True, null=True)
     
     # Structured description data (parsed from description field)
     structured_description = models.JSONField(blank=True, null=True, help_text="Parsed structured data from job description")
@@ -79,9 +115,14 @@ class Job(models.Model):
         return f"{self.title} @ {self.company.name}"
 
     def save(self, *args, **kwargs):
-        # Auto-fill company_logo if empty
-        if not self.company_logo and self.company and self.company.logo:
-            self.company_logo = self.company.logo
+        # Extract first_published from raw data if posted_at is not set
+        if not self.posted_at and self.raw and isinstance(self.raw, dict):
+            from .utils import parse_date
+            first_published = self.raw.get("first_published")
+            if first_published:
+                parsed_date = parse_date(first_published)
+                if parsed_date:
+                    self.posted_at = parsed_date
         
         # Parse structured description if description exists and structured_description is empty
         if self.description and not self.structured_description:

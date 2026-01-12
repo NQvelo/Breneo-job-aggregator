@@ -46,13 +46,20 @@ def fetch_greenhouse(handle, company_name, logo=None):
                     content = ""
 
             text_desc = BeautifulSoup(content or "", "html.parser").get_text(separator="\n").strip()
+            # Prefer first_published for accurate posting date
+            posted_at = parse_date(
+                job.get("first_published") or 
+                job.get("updated_at") or 
+                job.get("created_at")
+            ) or timezone.now()  # Fallback to current time if no date found
+            
             jobs.append({
                 "title": job.get("title") or "",
                 "company": company_name,
                 "location": (job.get("location") or {}).get("name", ""),
                 "description": text_desc,
                 "apply_url": absolute_url,
-                "posted_at": parse_date(job.get("updated_at") or job.get("created_at")),
+                "posted_at": posted_at,
                 "platform": "greenhouse",
                 "external_job_id": str(job_id),
                 "raw": job,

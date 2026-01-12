@@ -91,7 +91,6 @@ class Command(BaseCommand):
                             "posted_at": parse_date(j.get("posted_at")) if j.get("posted_at") else None,
                             "raw": j.get("raw") or {},
                             "is_active": True,
-                            "company_logo": j.get("logo") or company_logo,
                         },
                     )
                     total += 1

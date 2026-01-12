@@ -4,39 +4,130 @@ from datetime import datetime
 
 
 class JobSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Job
-        fields = [
-            'id', 'title', 'company',  "company_logo",  'location',
-            'description', 'apply_url', 'platform',
-            'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
-        ]
-        read_only_fields = ['id', 'fetched_at']
-
-
-class NestedJobSerializer(serializers.ModelSerializer):
-    """Serializer for jobs nested within company data"""
-    company_name = serializers.CharField(source='company.name', read_only=True)
     company_logo = serializers.SerializerMethodField()
     
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company_name', 'company_logo', 'location', 'description', 'apply_url', 'platform',
+            'id', 'title', 'company', 'company_logo', 'location',
+            'description', 'apply_url', 'platform',
             'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
     
     def get_company_logo(self, obj):
-        """Get company logo in the correct format"""
+        """Get company logo from company model"""
         from jobs.fetchers import get_logo_url
         
-        # Use company logo if it exists and is in correct format
-        if obj.company.logo and 'img.logo.dev/name/' in obj.company.logo:
+        # Use company logo if it exists
+        if obj.company and obj.company.logo:
             return obj.company.logo
         
         # Generate logo URL using the correct format
-        return get_logo_url(obj.company.name)
+        if obj.company:
+            return get_logo_url(obj.company.name)
+        return None
+
+
+class CompanyInfoSerializer(serializers.ModelSerializer):
+    """Serializer for company information nested within job responses"""
+    logo = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Company
+        fields = [
+            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'founded_date', 'employees_count', 'social_links', 'additional_details',
+        ]
+        read_only_fields = ['id']
+    
+    def get_logo(self, obj):
+        """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
+        from jobs.fetchers import get_logo_url
+        
+        # If logo exists and is in the correct format, return it
+        if obj.logo and 'img.logo.dev/name/' in obj.logo:
+            return obj.logo
+        
+        # Otherwise, generate the logo URL using the correct format
+        return get_logo_url(obj.name)
+    
+    def to_representation(self, instance):
+        """Ensure None values are handled properly"""
+        representation = super().to_representation(instance)
+        # Convert None to empty string for domain and website
+        if representation.get('domain') is None:
+            representation['domain'] = ''
+        if representation.get('website') is None:
+            representation['website'] = ''
+        if representation.get('description') is None:
+            representation['description'] = ''
+        # Ensure social_links and additional_details are dicts, not None
+        if representation.get('social_links') is None:
+            representation['social_links'] = {}
+        if representation.get('additional_details') is None:
+            representation['additional_details'] = {}
+        return representation
+
+
+class NestedJobSerializer(serializers.ModelSerializer):
+    """Serializer for jobs nested within company data"""
+    company = CompanyInfoSerializer(read_only=True)
+    
+    class Meta:
+        model = Job
+        fields = [
+            'id', 'title', 'company', 'location', 'description', 'apply_url', 'platform',
+            'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
+        ]
+        read_only_fields = ['id', 'fetched_at']
+
+
+class CompanyDetailSerializer(serializers.ModelSerializer):
+    """Serializer for company details with all fields"""
+    logo = serializers.SerializerMethodField()
+    job_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Company
+        fields = [
+            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'founded_date', 'employees_count', 'social_links', 'additional_details',
+            'created_at', 'updated_at', 'job_count'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_logo(self, obj):
+        """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
+        from jobs.fetchers import get_logo_url
+        
+        # If logo exists and is in the correct format, return it
+        if obj.logo and 'img.logo.dev/name/' in obj.logo:
+            return obj.logo
+        
+        # Otherwise, generate the logo URL using the correct format
+        return get_logo_url(obj.name)
+    
+    def get_job_count(self, obj):
+        """Get count of active jobs for this company"""
+        return obj.jobs.filter(is_active=True).count()
+    
+    def to_representation(self, instance):
+        """Ensure None values are handled properly"""
+        representation = super().to_representation(instance)
+        # Convert None to empty string for domain and website
+        if representation.get('domain') is None:
+            representation['domain'] = ''
+        if representation.get('website') is None:
+            representation['website'] = ''
+        if representation.get('description') is None:
+            representation['description'] = ''
+        # Ensure social_links and additional_details are dicts, not None
+        if representation.get('social_links') is None:
+            representation['social_links'] = {}
+        if representation.get('additional_details') is None:
+            representation['additional_details'] = {}
+        return representation
 
 
 class CompanyJobsSerializer(serializers.ModelSerializer):
