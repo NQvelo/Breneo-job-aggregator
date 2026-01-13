@@ -17,6 +17,7 @@ COMPANIES = [
     {"name": "Zapier", "platform": "greenhouse", "handle": "zapier", "logo": ""},
     {"name": "Drift", "platform": "greenhouse", "handle": "drift", "logo": ""},
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom", "logo": ""},
+    {"name": "Xometry", "platform": "greenhouse", "handle": "xometry", "logo": ""},
 
 
     # Lever companies

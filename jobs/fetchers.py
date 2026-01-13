@@ -4,6 +4,8 @@ from .utils import parse_date, robots_allowed
 import logging
 from urllib.parse import urljoin
 import feedparser
+from django.utils import timezone
+import re
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,6 +26,43 @@ def get_logo_url(company_name: str, size=101) -> str:
     return f"https://img.logo.dev/name/{safe_name}?token={LOGO_DEV_PUBLIC_KEY}&size={size}&retina=true"
 
 
+def clean_html_to_text(html_content):
+    """
+    Convert HTML content to clean plain text.
+    Removes all HTML tags and normalizes whitespace.
+    
+    Args:
+        html_content: HTML string or None
+        
+    Returns:
+        Clean plain text string
+    """
+    if not html_content:
+        return ""
+    
+    try:
+        # Parse HTML and extract text
+        soup = BeautifulSoup(str(html_content), "html.parser")
+        text = soup.get_text(separator="\n")
+        
+        # Normalize whitespace: replace multiple newlines with double newline, 
+        # replace multiple spaces with single space, strip each line
+        lines = [line.strip() for line in text.split("\n")]
+        text = "\n".join(line for line in lines if line)
+        
+        # Replace multiple consecutive newlines with double newline
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Final strip
+        return text.strip()
+    except Exception as e:
+        logger.warning(f"Error cleaning HTML: {e}")
+        # Fallback: try to remove HTML tags with regex if BeautifulSoup fails
+        text = re.sub(r'<[^>]+>', '', str(html_content))
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+
+
 def fetch_greenhouse(handle, company_name, logo=None):
     logo = logo or get_logo_url(company_name)
     url = f"https://boards-api.greenhouse.io/v1/boards/{handle}/jobs"
@@ -35,17 +74,22 @@ def fetch_greenhouse(handle, company_name, logo=None):
             job_id = job.get("id")
             absolute_url = job.get("absolute_url") or f"https://boards.greenhouse.io/{handle}/jobs/{job_id}"
             content = job.get("content", "")
-            # If the API doesn't include content, attempt to fetch the job page HTML
-            if not content and absolute_url:
+            
+            # If the API doesn't include content in the list endpoint, fetch individual job details
+            if not content and job_id:
                 try:
-                    pg = safe_get(absolute_url)
-                    soup = BeautifulSoup(pg.text, "html.parser")
-                    desc_el = soup.select_one("div.content") or soup.select_one(".posting-description") or soup.select_one("#content")
-                    content = desc_el.get_text(separator="\n").strip() if desc_el else ""
-                except Exception:
+                    job_url = f"https://boards-api.greenhouse.io/v1/boards/{handle}/jobs/{job_id}"
+                    job_r = safe_get(job_url)
+                    job_data = job_r.json()
+                    content = job_data.get("content", "")
+                    # Update job data with individual job details if needed
+                    if job_data.get("first_published") and not job.get("first_published"):
+                        job["first_published"] = job_data.get("first_published")
+                except Exception as e:
+                    logger.warning("Failed to fetch individual job details for %s job %s: %s", company_name, job_id, e)
                     content = ""
 
-            text_desc = BeautifulSoup(content or "", "html.parser").get_text(separator="\n").strip()
+            text_desc = clean_html_to_text(content)
             # Prefer first_published for accurate posting date
             posted_at = parse_date(
                 job.get("first_published") or 
@@ -81,7 +125,7 @@ def fetch_lever(handle, company_name, logo=None):
             job_id = job.get("id") or job.get("uuid") or job.get("postingId")
             hosted_url = job.get("hostedUrl") or job.get("applyUrl") or job.get("url")
             html_desc = job.get("description") or ""
-            text_desc = BeautifulSoup(html_desc, "html.parser").get_text(separator="\n").strip()
+            text_desc = clean_html_to_text(html_desc)
             jobs.append({
                 "title": job.get("text") or job.get("title") or "",
                 "company": company_name,
@@ -113,7 +157,7 @@ def fetch_workable(company_slug, company_name, logo=None):
                 "title": item.title.text if item.title else "",
                 "company": company_name,
                 "location": None,
-                "description": BeautifulSoup(desc, "html.parser").get_text(),
+                "description": clean_html_to_text(desc),
                 "apply_url": link,
                 "posted_at": None,
                 "platform": "workable",
@@ -139,7 +183,7 @@ def fetch_rss(feed_url, company_name, logo=None):
                 "title": entry.get("title") or "",
                 "company": company_name,
                 "location": None,
-                "description": BeautifulSoup(desc, "html.parser").get_text(),
+                "description": clean_html_to_text(desc),
                 "apply_url": link,
                 "posted_at": parse_date(entry.get("published") or entry.get("updated")),
                 "platform": "rss",
@@ -258,7 +302,7 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
         postings = data["data"]["jobBoardWithTeams"]["jobPostings"]
         for j in postings:
             html_desc = j.get("descriptionHtml") or ""
-            text_desc = BeautifulSoup(html_desc, "html.parser").get_text(separator="\n").strip() if html_desc else ""
+            text_desc = clean_html_to_text(html_desc)
             jobs.append({
                 "title": j["title"],
                 "company": company_name,
@@ -274,27 +318,6 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
     except Exception:
         logger.exception("Ashby fetch failed for %s", company_name)
 
-    return jobs
-
-
-
-def fetch_rss(url, company_name=None):
-    """
-    Fetch jobs from RSS feed. Returns a list of dicts.
-    """
-    jobs = []
-    feed = feedparser.parse(url)
-    for entry in feed.entries:
-        jobs.append({
-            "title": entry.title,
-            "location": getattr(entry, "location", None),
-            "description": getattr(entry, "summary", ""),
-            "apply_url": entry.link,
-            "external_job_id": entry.id if hasattr(entry, "id") else entry.link,
-            "posted_at": getattr(entry, "published", None),
-            "raw": entry,
-            "logo": None,
-        })
     return jobs
 
 # import httpx

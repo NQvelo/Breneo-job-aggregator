@@ -1,4 +1,7 @@
 from django.db import models
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Company(models.Model):
@@ -80,6 +83,31 @@ class Job(models.Model):
     location = models.CharField(max_length=200, blank=True, null=True)
 
     description = models.TextField(blank=True, null=True)
+    
+    # Extracted sections from description using AI
+    responsibilities = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Extracted responsibilities section from job description"
+    )
+    qualifications = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Extracted qualifications/requirements section from job description"
+    )
+    
+    team_description = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Team description from job posting, if available"
+    )
+    
+    benefits = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Benefits section from job posting, if available"
+    )
+    
     apply_url = models.URLField(blank=True, null=True)
 
     platform = models.CharField(
@@ -115,6 +143,23 @@ class Job(models.Model):
         return f"{self.title} @ {self.company.name}"
 
     def save(self, *args, **kwargs):
+        # Clean description to ensure it's plain text (safety net)
+        if self.description:
+            from bs4 import BeautifulSoup
+            import re
+            try:
+                # Check if description contains HTML tags
+                if '<' in self.description and '>' in self.description:
+                    soup = BeautifulSoup(self.description, "html.parser")
+                    text = soup.get_text(separator="\n")
+                    # Normalize whitespace
+                    lines = [line.strip() for line in text.split("\n")]
+                    text = "\n".join(line for line in lines if line)
+                    text = re.sub(r'\n{3,}', '\n\n', text)
+                    self.description = text.strip()
+            except Exception:
+                pass  # If cleaning fails, keep original description
+        
         # Extract first_published from raw data if posted_at is not set
         if not self.posted_at and self.raw and isinstance(self.raw, dict):
             from .utils import parse_date
@@ -124,6 +169,41 @@ class Job(models.Model):
                 if parsed_date:
                     self.posted_at = parsed_date
         
+        # Extract responsibilities and qualifications if description exists
+        if self.description and (not self.responsibilities or not self.qualifications):
+            from .utils import extract_responsibilities_and_qualifications
+            try:
+                # Extract and summarize automatically
+                responsibilities, qualifications = extract_responsibilities_and_qualifications(
+                    self.description, 
+                    summarize=True
+                )
+                if responsibilities and not self.responsibilities:
+                    self.responsibilities = responsibilities
+                if qualifications and not self.qualifications:
+                    self.qualifications = qualifications
+            except Exception as e:
+                logger.warning(f"Failed to extract responsibilities/qualifications: {e}")
+        
+        # Summarize existing responsibilities/qualifications if they're too long
+        if self.responsibilities and len(self.responsibilities) > 300:
+            from .utils import summarize_text
+            try:
+                summarized = summarize_text(self.responsibilities, max_length=200, min_length=50)
+                if summarized and summarized != self.responsibilities:
+                    self.responsibilities = summarized
+            except Exception as e:
+                logger.debug(f"Failed to summarize responsibilities: {e}")
+        
+        if self.qualifications and len(self.qualifications) > 300:
+            from .utils import summarize_text
+            try:
+                summarized = summarize_text(self.qualifications, max_length=200, min_length=50)
+                if summarized and summarized != self.qualifications:
+                    self.qualifications = summarized
+            except Exception as e:
+                logger.debug(f"Failed to summarize qualifications: {e}")
+        
         # Parse structured description if description exists and structured_description is empty
         if self.description and not self.structured_description:
             from .utils import parse_structured_description
@@ -131,6 +211,54 @@ class Job(models.Model):
                 self.structured_description = parse_structured_description(self.description)
             except Exception:
                 pass  # If parsing fails, continue without structured description
+        
+        # Process job description to extract structured fields (team_description, benefits, etc.)
+        # Always process if description exists and we're missing key fields, or if description changed
+        if self.description:
+            from .utils import process_job_description
+            try:
+                # Check if we need to process (missing fields or description might have changed)
+                needs_processing = (
+                    not self.responsibilities or 
+                    not self.qualifications or 
+                    not self.team_description or 
+                    not self.benefits or
+                    not self.structured_description
+                )
+                
+                if needs_processing:
+                    processed = process_job_description(self.description)
+                    
+                    # Update fields if we have processed data
+                    if processed:
+                        if processed.get('team_description') and not self.team_description:
+                            self.team_description = processed.get('team_description')
+                        if processed.get('benefits') and not self.benefits:
+                            self.benefits = processed.get('benefits')
+                        
+                        # Update responsibilities and qualifications if they're empty or better structured
+                        if processed.get('responsibilities') and (
+                            not self.responsibilities or 
+                            len(processed.get('responsibilities', '')) > len(self.responsibilities or '')
+                        ):
+                            self.responsibilities = processed.get('responsibilities')
+                        if processed.get('qualifications') and (
+                            not self.qualifications or 
+                            len(processed.get('qualifications', '')) > len(self.qualifications or '')
+                        ):
+                            self.qualifications = processed.get('qualifications')
+                        
+                        # Update structured_description with all processed data
+                        if not self.structured_description:
+                            self.structured_description = {}
+                        if isinstance(self.structured_description, dict):
+                            self.structured_description.update({
+                                'summary': processed.get('summary'),
+                                'company_overview': processed.get('company_overview'),
+                                'role_description': processed.get('role_description'),
+                            })
+            except Exception as e:
+                logger.warning(f"Failed to process job description: {e}")
         
         super().save(*args, **kwargs)
 

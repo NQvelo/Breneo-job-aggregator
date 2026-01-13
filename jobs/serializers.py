@@ -10,8 +10,8 @@ class JobSerializer(serializers.ModelSerializer):
         model = Job
         fields = [
             'id', 'title', 'company', 'company_logo', 'location',
-            'description', 'apply_url', 'platform',
-            'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
+            'description', 'responsibilities', 'qualifications', 'team_description', 'benefits',
+            'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
     
@@ -77,8 +77,9 @@ class NestedJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'location', 'description', 'apply_url', 'platform',
-            'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
+            'id', 'title', 'company', 'location', 'description', 'responsibilities', 'qualifications',
+            'team_description', 'benefits', 'apply_url', 'platform', 'external_job_id', 
+            'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
 
@@ -173,6 +174,10 @@ def job_to_dict(job):
             "company": job.company,
             "location": job.location,
             "description": job.description,
+            "responsibilities": job.responsibilities,
+            "qualifications": job.qualifications,
+            "team_description": job.team_description,
+            "benefits": job.benefits,
             "apply_url": job.apply_url,
             "platform": job.platform,
             "external_job_id": job.external_job_id,
@@ -188,6 +193,10 @@ def job_to_dict(job):
             "company": job.get("company"),
             "location": job.get("location"),
             "description": job.get("description"),
+            "responsibilities": job.get("responsibilities"),
+            "qualifications": job.get("qualifications"),
+            "team_description": job.get("team_description"),
+            "benefits": job.get("benefits"),
             "apply_url": job.get("apply_url"),
             "platform": job.get("platform"),
             "external_job_id": job.get("external_job_id"),
