@@ -132,17 +132,16 @@ class JobSearchView(APIView):
         
         # Filter by country
         if country:
-            # Try to match location_country field or location field
+            # Filter by location field (location_country field was removed)
             # Handle common country variations
             country_variations = {
-                'us': ['usa', 'united states', 'united states of america'],
-                'uk': ['united kingdom', 'england', 'britain'],
-                'ca': ['canada'],
+                'us': ['usa', 'united states', 'united states of america', 'us'],
+                'uk': ['united kingdom', 'england', 'britain', 'uk'],
+                'ca': ['canada', 'ca'],
             }
             
-            country_filters = Q(
-                location_country__iexact=country
-            ) | Q(location__icontains=country)
+            # Start with the country code itself
+            country_filters = Q(location__icontains=country)
             
             # Add variations if country code matches
             if country in country_variations:
