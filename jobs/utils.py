@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import logging
@@ -16,7 +17,15 @@ try:
     from transformers import pipeline
     _transformers_available = True
 except ImportError:
-    logger.warning("transformers library not installed. AI extraction will use fallback method.")
+    pass
+
+try:
+    from duckduckgo_search import DDGS
+    _ddgs_available = True
+except ImportError:
+    _ddgs_available = False
+    logger.warning("duckduckgo-search library not installed. DuckDuckGo AI will be unavailable.")
+
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -51,121 +60,19 @@ def parse_date(date_str):
         return None
 
 
-def summarize_text(text, max_length=150, min_length=50):
+def summarize_text(text, max_length=500, min_length=100):
     """
-    Summarize text using Hugging Face summarization model.
-    Falls back to intelligent text truncation if API is unavailable.
-    
-    Args:
-        text: Text to summarize
-        max_length: Maximum length of summary
-        min_length: Minimum length of summary
-        
-    Returns:
-        Summarized text or intelligently truncated text if summarization fails
+    Summarize text using intelligent text truncation.
     """
     if not text or len(text.strip()) < 100:
-        # If text is too short, return as is
         return text
     
-    # Try free Hugging Face Inference API for summarization
-    try:
-        import os
-        api_token = os.environ.get("HUGGINGFACE_API_TOKEN")
-        
-        # Use free public inference API endpoint (works without token for many models)
-        # Try multiple free summarization models
-        free_models = [
-            "facebook/bart-large-cnn",
-            "google/pegasus-xsum",
-            "sshleifer/distilbart-cnn-12-6",
-        ]
-        
-        headers = {"Content-Type": "application/json"}
-        if api_token:
-            headers["Authorization"] = f"Bearer {api_token}"
-        
-        # Try each model until one works
-        for model_name in free_models:
-            api_url = f"https://api-inference.huggingface.co/models/{model_name}"
-            
-            # Limit input text to reasonable size (models have token limits)
-            input_text = text[:1024] if len(text) > 1024 else text
-            
-            payload = {
-                "inputs": input_text,
-                "parameters": {
-                    "max_length": max_length,
-                    "min_length": min_length,
-                    "do_sample": False
-                }
-            }
-            
-            # Try with retry for model loading
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    response = httpx.post(api_url, json=payload, headers=headers, timeout=45)
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        
-                        # Handle different response formats
-                        summary = None
-                        if isinstance(result, list) and len(result) > 0:
-                            if isinstance(result[0], dict):
-                                summary = result[0].get("summary_text", "").strip()
-                                if not summary:
-                                    summary = result[0].get("generated_text", "").strip()
-                            else:
-                                summary = str(result[0]).strip()
-                        elif isinstance(result, dict):
-                            summary = result.get("summary_text", "").strip()
-                            if not summary:
-                                summary = result.get("generated_text", "").strip()
-                        
-                        if summary and len(summary) > 0 and summary != input_text:
-                            if len(summary) < len(input_text):
-                                return summary
-                        
-                        # If we got a response but no valid summary, try next model
-                        break
-                    
-                    elif response.status_code == 503:
-                        # Model is loading, wait and retry
-                        if attempt < max_retries - 1:
-                            import time
-                            wait_time = 10 * (attempt + 1)
-                            logger.debug(f"Model {model_name} loading, waiting {wait_time}s...")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            # Try next model
-                            break
-                    elif response.status_code in (401, 403):
-                        logger.debug(f"Model {model_name} requires authentication. Trying next model.")
-                        break
-                    else:
-                        # Other error, try next model
-                        logger.debug(f"Model {model_name} returned status {response.status_code}. Trying next model.")
-                        break
-                        
-                except httpx.TimeoutException:
-                    if attempt < max_retries - 1:
-                        continue
-                    else:
-                        # Try next model
-                        break
-                except Exception as e:
-                    logger.debug(f"API error with {model_name}: {e}")
-                    # Try next model
-                    break
-                
-    except Exception as e:
-        logger.debug(f"Error accessing summarization API: {e}")
-    
-    # Fallback: Intelligent text truncation
-    # Extract first few sentences and key points
+    return _fallback_summarize(text, max_length, min_length)
+
+
+
+def _fallback_summarize(text, max_length=150, min_length=50):
+    """Intelligent text truncation fallback."""
     if len(text) > max_length:
         # Try to find a good breaking point
         sentences = text.split('. ')
@@ -302,83 +209,9 @@ def _extract_with_patterns(description_text):
 
 def _extract_with_ai(description_text):
     """
-    Extract responsibilities and qualifications using Hugging Face Inference API.
-    Uses a text generation model to extract structured information.
+    Placeholder for AI extraction - returns None to use pattern-matching fallback.
     """
-    try:
-        # Use Hugging Face Inference API (no API key required for public models)
-        # Using a text generation model that can follow instructions
-        api_url = "https://router.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-        
-        # Create prompts for extraction
-        responsibilities_prompt = f"""Extract only the responsibilities section from this job description. 
-Return only the responsibilities text, nothing else. If no responsibilities section exists, return "None".
-
-Job Description:
-{description_text[:2000]}
-
-Responsibilities:"""
-        
-        qualifications_prompt = f"""Extract only the qualifications/requirements section from this job description.
-Return only the qualifications text, nothing else. If no qualifications section exists, return "None".
-
-Job Description:
-{description_text[:2000]}
-
-Qualifications:"""
-        
-        headers = {
-            "Content-Type": "application/json",
-        }
-        
-        responsibilities = None
-        qualifications = None
-        
-        # Extract responsibilities
-        try:
-            resp_payload = {
-                "inputs": responsibilities_prompt,
-                "parameters": {
-                    "max_new_tokens": 500,
-                    "temperature": 0.3,
-                    "return_full_text": False
-                }
-            }
-            response = httpx.post(api_url, json=resp_payload, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if isinstance(result, list) and len(result) > 0:
-                    generated_text = result[0].get("generated_text", "").strip()
-                    if generated_text and generated_text.lower() != "none":
-                        responsibilities = generated_text
-        except Exception as e:
-            logger.debug(f"Error extracting responsibilities with AI: {e}")
-        
-        # Extract qualifications
-        try:
-            qual_payload = {
-                "inputs": qualifications_prompt,
-                "parameters": {
-                    "max_new_tokens": 500,
-                    "temperature": 0.3,
-                    "return_full_text": False
-                }
-            }
-            response = httpx.post(api_url, json=qual_payload, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if isinstance(result, list) and len(result) > 0:
-                    generated_text = result[0].get("generated_text", "").strip()
-                    if generated_text and generated_text.lower() != "none":
-                        qualifications = generated_text
-        except Exception as e:
-            logger.debug(f"Error extracting qualifications with AI: {e}")
-        
-        return responsibilities, qualifications
-        
-    except Exception as e:
-        logger.warning(f"AI extraction failed: {e}. Using pattern matching only.")
-        return None, None
+    return None, None
 
 
 def parse_structured_description(description_text):
@@ -470,150 +303,10 @@ def process_job_description(description_text):
     # Fallback: Use pattern matching and basic extraction
     return _process_with_patterns(description_text)
 
-
 def _process_with_ai(description_text):
     """
-    Process job description using AI (Hugging Face API).
+    Placeholder for AI processing - returns None to use pattern-matching fallback.
     """
-    try:
-        import os
-        api_token = os.environ.get("HUGGINGFACE_API_TOKEN")
-        
-        # Limit input text to reasonable size
-        input_text = description_text[:4000] if len(description_text) > 4000 else description_text
-        
-        prompt = f"""You are an AI assistant that processes raw job description text.
-
-Task:
-1. Summarize the job posting in a concise, professional way (max 5-6 sentences).
-2. Extract and normalize the content into the following structured fields:
-   - Company Overview: Brief description of the company (if mentioned)
-   - Description: Overall job description
-   - Role Description: What the role entails
-   - Responsibilities: Bullet points of key responsibilities
-   - Qualifications: Bullet points of required/preferred qualifications
-   - Benefits: Bullet points of benefits (if present, otherwise null)
-   - Team Description: Description of the team (if present, otherwise null)
-
-3. Remove irrelevant sections such as legal notices, equal opportunity statements, privacy policies, pay transparency explanations, interview recording notices, and long salary disclaimers.
-4. Merge duplicated sections (e.g., multiple "Required Qualifications") into one clean list.
-5. Rewrite all extracted content in clear, simple, neutral English, without changing meaning.
-6. Do not add new information that does not exist in the text.
-
-Return your response as a JSON object with these exact keys:
-{{
-  "summary": "5-6 sentence summary",
-  "company_overview": "company description or null",
-  "description": "job description",
-  "role_description": "role description",
-  "responsibilities": "bullet points as text (one per line with - prefix)",
-  "qualifications": "bullet points as text (one per line with - prefix)",
-  "benefits": "bullet points as text (one per line with - prefix) or null",
-  "team_description": "team description or null"
-}}
-
-Job Description:
-{input_text}
-
-JSON Response:"""
-        
-        # Use free Hugging Face models for text generation
-        # Try multiple free instruction-following models
-        free_models = [
-            "mistralai/Mistral-7B-Instruct-v0.2",
-            "HuggingFaceH4/zephyr-7b-beta",
-            "google/flan-t5-xxl",
-            "microsoft/DialoGPT-large",
-        ]
-        
-        headers = {"Content-Type": "application/json"}
-        if api_token:
-            headers["Authorization"] = f"Bearer {api_token}"
-        
-        # Try each model until one works
-        for model_name in free_models:
-            api_url = f"https://api-inference.huggingface.co/models/{model_name}"
-            
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": 2000,
-                    "temperature": 0.3,
-                    "return_full_text": False
-                }
-            }
-            
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    response = httpx.post(api_url, json=payload, headers=headers, timeout=60)
-                
-                    if response.status_code == 200:
-                        result = response.json()
-                        if isinstance(result, list) and len(result) > 0:
-                            generated_text = result[0].get("generated_text", "").strip()
-                            
-                            # Try to extract JSON from the response
-                            # Look for JSON object in the response
-                            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', generated_text, re.DOTALL)
-                            if json_match:
-                                try:
-                                    parsed = json.loads(json_match.group(0))
-                                    # Normalize the response
-                                    return {
-                                        'summary': parsed.get('summary'),
-                                        'company_overview': parsed.get('company_overview'),
-                                        'description': parsed.get('description'),
-                                        'role_description': parsed.get('role_description'),
-                                        'responsibilities': parsed.get('responsibilities'),
-                                        'qualifications': parsed.get('qualifications'),
-                                        'benefits': parsed.get('benefits'),
-                                        'team_description': parsed.get('team_description'),
-                                    }
-                                except json.JSONDecodeError:
-                                    pass
-                            
-                            # If JSON parsing failed, try to extract structured info from text
-                            parsed_result = _parse_ai_response_text(generated_text)
-                            if parsed_result and any(parsed_result.values()):
-                                return parsed_result
-                        
-                        # If we got a response but couldn't parse it, try next model
-                        break
-                    
-                    elif response.status_code == 503:
-                        # Model is loading, wait and retry
-                        if attempt < max_retries - 1:
-                            import time
-                            wait_time = 10 * (attempt + 1)
-                            logger.debug(f"Model {model_name} loading, waiting {wait_time}s...")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            # Try next model
-                            break
-                    elif response.status_code in (401, 403):
-                        logger.debug(f"Model {model_name} requires authentication. Trying next model.")
-                        break
-                    else:
-                        # Other error, try next model
-                        logger.debug(f"Model {model_name} returned status {response.status_code}. Trying next model.")
-                        break
-                        
-                except httpx.TimeoutException:
-                    if attempt < max_retries - 1:
-                        continue
-                    else:
-                        # Try next model
-                        break
-                except Exception as e:
-                    logger.debug(f"API error with {model_name}: {e}")
-                    # Try next model
-                    break
-                
-    except Exception as e:
-        logger.debug(f"Error in AI processing: {e}")
-    
     return None
 
 
