@@ -52,6 +52,8 @@ class JobSearchView(APIView):
         If provided, takes precedence over 'query' parameter
     - country: Filter by country code (e.g., 'us', 'uk') (optional)
     - date_posted: Filter by date ('all', 'today', 'week', 'month') (optional, default: 'all')
+    - recent: Filter recently fetched jobs ('true' to show only jobs fetched in last 24 hours) (optional)
+    - sort: Sort order ('newest', 'oldest', 'recently_fetched') (optional, default: 'newest')
     - offset: Offset for pagination (default: 0)
     - limit: Number of results per page (default: 20, max: 100)
     - page: Page number (alternative to offset, default: 1)
@@ -67,6 +69,8 @@ class JobSearchView(APIView):
         title_filter = request.query_params.get('title_filter', '').strip()
         country = request.query_params.get('country', '').strip().lower()
         date_posted = request.query_params.get('date_posted', 'all').strip().lower()
+        recent = request.query_params.get('recent', '').strip().lower() == 'true'
+        sort_order = request.query_params.get('sort', 'newest').strip().lower()
         
         # Handle pagination - support both offset/limit and page/num_pages
         try:
@@ -160,8 +164,22 @@ class JobSearchView(APIView):
             elif date_posted == 'month':
                 jobs = jobs.filter(posted_at__gte=now - timedelta(days=30))
         
-        # Order by posted_at (newest first), fallback to fetched_at if posted_at is null
-        jobs = jobs.order_by('-posted_at', '-fetched_at')
+        # Filter by recently fetched (last 24 hours)
+        if recent:
+            now = timezone.now()
+            recent_threshold = now - timedelta(hours=24)
+            jobs = jobs.filter(fetched_at__gte=recent_threshold)
+        
+        # Sort jobs
+        if sort_order == 'recently_fetched':
+            # Sort by fetched_at (most recently fetched first)
+            jobs = jobs.order_by('-fetched_at', '-posted_at')
+        elif sort_order == 'oldest':
+            # Sort by posted_at (oldest first)
+            jobs = jobs.order_by('posted_at', 'fetched_at')
+        else:
+            # Default: newest first (by posted_at, fallback to fetched_at)
+            jobs = jobs.order_by('-posted_at', '-fetched_at')
         
         # Get total count before pagination
         total_results = jobs.count()
@@ -226,6 +244,8 @@ class JobSearchView(APIView):
                 'title_filter': parsed_title_filter if parsed_title_filter else None,
                 'country': country if country else None,
                 'date_posted': date_posted if date_posted != 'all' else None,
+                'recent': recent,
+                'sort': sort_order,
             }
         }
         
@@ -353,3 +373,59 @@ class JobDetailsView(APIView):
         serializer = NestedJobSerializer(job)
         
         return Response(serializer.data)
+
+
+class TriggerFetchView(APIView):
+    """
+    Trigger endpoint to manually fetch jobs.
+    Can be called by external cron services or webhooks.
+    
+    Query parameters:
+    - secret: Secret token for authentication (optional, set FETCH_SECRET env var)
+    """
+    
+    def post(self, request):
+        import os
+        from django.core.management import call_command
+        from io import StringIO
+        
+        # Optional authentication via secret token
+        secret = request.query_params.get('secret') or request.data.get('secret')
+        expected_secret = os.environ.get('FETCH_SECRET')
+        
+        if expected_secret and secret != expected_secret:
+            return Response(
+                {'error': 'Unauthorized'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            # Capture output
+            output = StringIO()
+            
+            # Run fetch_jobs command
+            call_command('fetch_jobs', stdout=output)
+            
+            output_str = output.getvalue()
+            
+            return Response({
+                'status': 'success',
+                'message': 'Job fetching completed',
+                'output': output_str
+            })
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Error triggering fetch_jobs")
+            return Response(
+                {
+                    'status': 'error',
+                    'message': 'Failed to fetch jobs',
+                    'error': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get(self, request):
+        """Allow GET requests for easy cron job calling"""
+        return self.post(request)

@@ -1,10 +1,20 @@
 from django.core.management.base import BaseCommand
+from django.db import transaction, connection
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description
 from jobs import fetchers
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
+# Configure logging to ensure errors are visible in cron jobs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
 
 # Generate logo URL from logo.dev
 def get_logo_url(company_name: str, size=101) -> str:
@@ -45,7 +55,22 @@ class Command(BaseCommand):
     help = "Fetch jobs from configured companies and store/update in DB"
 
     def handle(self, *args, **options):
+        try:
+            # Verify database connection
+            from django.db import connection
+            connection.ensure_connection()
+            
+            self.stdout.write(self.style.SUCCESS("Starting job fetch..."))
+            logger.info("Starting job fetch command")
+            
+        except Exception as e:
+            error_msg = f"Database connection failed: {str(e)}"
+            self.stdout.write(self.style.ERROR(error_msg))
+            logger.error(error_msg)
+            sys.exit(1)
+        
         total = 0
+        errors = []
         for comp in COMPANIES:
             platform = comp.get("platform")
             company_name = comp.get("name")
@@ -85,8 +110,10 @@ class Command(BaseCommand):
                 else:
                     jobs_data = fetcher(comp.get("url") or comp.get("handle"), company_name)
             except Exception as e:
-                logger.exception("Error fetching jobs for %s", company_name)
-                self.stdout.write(self.style.ERROR(f"  ✗ Error fetching: {str(e)}"))
+                error_msg = f"Error fetching jobs for {company_name}: {str(e)}"
+                logger.exception(error_msg)
+                self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
+                errors.append(error_msg)
                 continue
 
             if not jobs_data:
@@ -95,6 +122,8 @@ class Command(BaseCommand):
 
             found_ids = set()
             company_job_count = 0
+            # Process jobs in batches to avoid transaction issues
+            batch_size = 50
             for j in jobs_data:
                 try:
                     ext_id = j.get("external_job_id") or j.get("apply_url")
@@ -165,9 +194,16 @@ class Command(BaseCommand):
                     
                     total += 1
                     company_job_count += 1
+                    
+                    # Commit in batches to ensure persistence without slowing down too much
+                    if company_job_count % batch_size == 0:
+                        transaction.commit()
+                        logger.debug(f"Committed batch of {batch_size} jobs for {company_name}")
 
-                except Exception:
-                    logger.exception("Failed to save job: %s", j.get("title"))
+                except Exception as e:
+                    error_msg = f"Failed to save job {j.get('title')}: {str(e)}"
+                    logger.exception(error_msg)
+                    errors.append(error_msg)
 
             # Mark old jobs inactive
             try:
@@ -176,13 +212,52 @@ class Command(BaseCommand):
                     inactive_count = qs.exclude(external_job_id__in=found_ids).update(is_active=False)
                     if inactive_count > 0:
                         self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
-            except Exception:
-                logger.exception("Failed to mark inactive jobs for %s (%s)", company_name, platform)
+                        # Explicitly commit transaction
+                        transaction.commit()
+            except Exception as e:
+                error_msg = f"Failed to mark inactive jobs for {company_name} ({platform}): {str(e)}"
+                logger.exception(error_msg)
+                errors.append(error_msg)
 
             self.stdout.write(self.style.SUCCESS(f"  ✓ Fetched {company_job_count} jobs for {company_name}"))
 
+        # Final commit to ensure all changes are persisted
+        transaction.commit()
+        
+        # Verify jobs were actually saved to database
+        try:
+            connection.close()  # Close connection to force flush
+            
+            # Reconnect and verify
+            connection.ensure_connection()
+            
+            # Count active jobs in database
+            saved_count = Job.objects.filter(is_active=True).count()
+            self.stdout.write(f"  📊 Active jobs in database: {saved_count}")
+            logger.info("Active jobs in database after fetch: %d", saved_count)
+            
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f"  ⚠ Could not verify database: {str(e)}"))
+            logger.warning("Could not verify database after fetch: %s", str(e))
+        
         self.stdout.write('')
-        self.stdout.write(self.style.SUCCESS(f"Total jobs fetched/updated: {total}"))
-        logger.info("Total jobs fetched/updated: %d", total)
+        if errors:
+            self.stdout.write(self.style.WARNING(f"Encountered {len(errors)} errors during fetch"))
+            for error in errors[:5]:  # Show first 5 errors
+                logger.error(error)
+        
+        if total > 0:
+            self.stdout.write(self.style.SUCCESS(f"✓ Successfully fetched/updated {total} jobs"))
+            logger.info("Job fetch completed successfully. Total jobs: %d", total)
+        else:
+            self.stdout.write(self.style.WARNING("⚠ No new jobs were fetched"))
+            logger.warning("Job fetch completed but no jobs were found/updated")
+        
+        # Return exit code (0 = success, 1 = failure)
+        if total == 0 and not any("Error fetching" not in e for e in errors):
+            # Only exit with error if we had actual fetching errors
+            pass  # It's OK if no jobs found, just log it
+        
+        return total
 
 

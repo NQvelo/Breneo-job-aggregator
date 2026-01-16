@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import dj_database_url
 
 # ---------------------------
 # BASE DIRECTORY
@@ -87,12 +88,23 @@ TEMPLATES = [
 # ---------------------------
 # DATABASE
 # ---------------------------
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Use DATABASE_URL from environment if available (Render PostgreSQL)
+# Otherwise, fall back to SQLite for local development
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    # Render PostgreSQL (production)
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
     }
-}
+else:
+    # SQLite (local development)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # ---------------------------
 # PASSWORD VALIDATORS

@@ -1,0 +1,14 @@
+services:
+  # Main web service
+  - type: web
+    name: job-aggregator-web
+    env: python
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate
+    startCommand: gunicorn job_aggregator.wsgi:application
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
