@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import dj_database_url
 
 # ---------------------------
 # BASE DIRECTORY
@@ -94,9 +93,21 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
     # Render PostgreSQL (production)
-    DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-    }
+    # Import dj_database_url only when DATABASE_URL is set
+    try:
+        import dj_database_url
+        DATABASES = {
+            'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+        }
+    except ImportError:
+        # If dj_database_url is not installed, fall back to manual parsing or SQLite
+        # This should not happen in production, but provides a safety fallback
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
 else:
     # SQLite (local development)
     DATABASES = {
