@@ -253,11 +253,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("⚠ No new jobs were fetched"))
             logger.warning("Job fetch completed but no jobs were found/updated")
         
-        # Return exit code (0 = success, 1 = failure)
-        if total == 0 and not any("Error fetching" not in e for e in errors):
-            # Only exit with error if we had actual fetching errors
-            pass  # It's OK if no jobs found, just log it
-        
-        return total
+        # Django management commands should not return values from handle()
+        # All output is already written to self.stdout above
+        # Exit code is automatically 0 (success) unless an exception occurs
 
 
