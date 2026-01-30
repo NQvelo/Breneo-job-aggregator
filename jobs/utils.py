@@ -230,7 +230,6 @@ def process_job_description(description_text):
             'responsibilities': None,
             'qualifications': None,
             'benefits': None,
-            'team_description': None,
         }
     
     try:
@@ -264,7 +263,6 @@ def _parse_ai_response_text(text):
         'responsibilities': None,
         'qualifications': None,
         'benefits': None,
-        'team_description': None,
     }
     
     # Try to extract sections using keywords
@@ -303,11 +301,6 @@ def _parse_ai_response_text(text):
                 result[current_section] = '\n'.join(current_text).strip() if current_text else None
             current_section = 'benefits'
             current_text = []
-        elif 'team description' in line_lower or 'team' in line_lower:
-            if current_section:
-                result[current_section] = '\n'.join(current_text).strip() if current_text else None
-            current_section = 'team_description'
-            current_text = []
         elif current_section and line.strip():
             current_text.append(line.strip())
     
@@ -316,6 +309,92 @@ def _parse_ai_response_text(text):
         result[current_section] = '\n'.join(current_text).strip() if current_text else None
     
     return result
+
+
+# Benefits section headings (prefer extracting from these)
+_BENEFITS_SECTION_PATTERNS = [
+    r'\bbenefits\b',
+    r'\bperks\b',
+    r'what we offer',
+    r'compensation (?:&|and) benefits',
+    r"how we'll take care of you",
+    r'total rewards',
+]
+
+# Keywords for detecting benefits when no explicit section exists
+_BENEFITS_KEYWORDS = [
+    'health insurance', 'dental', 'vision', 'medical coverage',
+    'pto', 'vacation', 'parental leave', 'paid leave', 'sick leave',
+    'equity', 'stock options', '401k', '401(k)', 'retirement',
+    'bonus', 'performance bonus', 'annual bonus',
+    'remote', 'work from home', 'flexible work', 'flexible hours',
+    'learning budget', 'learning stipend', 'education', 'training',
+    'travel credits', 'gym', 'wellness', 'mental health',
+    'free meals', 'catered', 'snacks', 'coffee',
+    'unlimited pto', 'unlimited vacation',
+]
+
+# Patterns that indicate a line should be excluded from benefits (pay, location, EEO, etc.)
+_BENEFITS_EXCLUDE_PATTERNS = [
+    r'\$[\d,]+', r'\d+\s*k\s*(?:salary|pay)?', r'\d+\s*-\s*\d+\s*k',
+    r'\b(?:usd|eur|gbp)\b', r'\bcompensation\b.*\b\d',
+    r'\b(?:remote|hybrid|onsite)\b.*\b(?:only|eligible|required)\b',
+    r'\b(?:equal opportunity|eeo|affirmative action|inclusion|accommodation)\b',
+    r'\b(?:privacy|legal|disclaimer|applicant)\b',
+]
+
+
+def _is_benefit_line_excluded(line: str) -> bool:
+    """Return True if line contains pay, location rules, EEO, or legal text."""
+    line_lower = line.lower().strip()
+    for pattern in _BENEFITS_EXCLUDE_PATTERNS:
+        if re.search(pattern, line_lower, re.IGNORECASE):
+            return True
+    return False
+
+
+def _filter_and_format_benefits(raw_benefits: str) -> str | None:
+    """
+    Filter and format benefits: max 5 lines, each ≤120 chars.
+    Exclude pay, location, EEO/legal text.
+    """
+    if not raw_benefits or not raw_benefits.strip():
+        return None
+    lines = [ln.strip() for ln in raw_benefits.split('\n') if ln.strip()]
+    filtered = []
+    for ln in lines:
+        if _is_benefit_line_excluded(ln):
+            continue
+        # Trim to 120 chars at word boundary
+        if len(ln) > 120:
+            truncated = ln[:117].rsplit(' ', 1)[0]
+            ln = truncated if len(truncated) > 50 else ln[:120]
+        filtered.append(ln)
+        if len(filtered) >= 5:
+            break
+    return '\n'.join(filtered).strip() if filtered else None
+
+
+def _extract_benefits_by_keywords(text: str) -> str | None:
+    """Extract benefits using keyword-based rules when no explicit section exists."""
+    if not text or not text.strip():
+        return None
+    text_lower = text.lower()
+    found = []
+    for kw in _BENEFITS_KEYWORDS:
+        if kw in text_lower:
+            # Extract a short phrase around the keyword (up to ~80 chars)
+            idx = text_lower.find(kw)
+            start = max(0, idx - 20)
+            end = min(len(text), idx + len(kw) + 60)
+            phrase = text[start:end].strip()
+            # Clean: take first sentence or clause
+            phrase = re.split(r'[.;\n]', phrase)[0].strip()
+            if 10 <= len(phrase) <= 120 and not _is_benefit_line_excluded(phrase):
+                found.append(phrase)
+                if len(found) >= 5:
+                    break
+    return '\n'.join(found).strip() if found else None
 
 
 def _process_with_patterns(description_text):
@@ -333,7 +412,6 @@ def _process_with_patterns(description_text):
         'responsibilities': None,
         'qualifications': None,
         'benefits': None,
-        'team_description': None,
     }
     
     # Extract using existing pattern matching
@@ -341,9 +419,10 @@ def _process_with_patterns(description_text):
     result['responsibilities'] = responsibilities
     result['qualifications'] = qualifications
     
-    # Try to extract benefits
+    # Try to extract benefits from explicit sections (Benefits, Perks, What we offer, etc.)
     benefits_patterns = [
-        r'(?:benefits|perks|compensation and benefits|what we offer)',
+        r'\b(?:benefits|perks|what we offer|compensation (?:&|and) benefits)\b',
+        r"(?:how we'll take care of you|total rewards)",
     ]
     
     lines = cleaned_text.split('\n')
@@ -365,32 +444,10 @@ def _process_with_patterns(description_text):
             current_text.append(line.strip())
     
     if current_section == 'benefits' and current_text:
-        result['benefits'] = '\n'.join(current_text).strip()
-    
-    # Try to extract team description
-    team_patterns = [
-        r'(?:team|about the team|our team|join our team)',
-    ]
-    
-    current_section = None
-    current_text = []
-    
-    for line in lines:
-        line_lower = line.lower().strip()
-        
-        if any(re.search(pattern, line_lower) for pattern in team_patterns):
-            if current_section == 'team_description':
-                current_text.append(line.strip())
-            else:
-                if current_section:
-                    result[current_section] = '\n'.join(current_text).strip() if current_text else None
-                current_section = 'team_description'
-                current_text = []
-        elif current_section == 'team_description' and line.strip():
-            current_text.append(line.strip())
-    
-    if current_section == 'team_description' and current_text:
-        result['team_description'] = '\n'.join(current_text).strip()
+        result['benefits'] = _filter_and_format_benefits('\n'.join(current_text).strip())
+    elif not result['benefits']:
+        # Keyword-based fallback when no explicit benefits section found
+        result['benefits'] = _extract_benefits_by_keywords(cleaned_text)
     
     # Create summary from first few sentences
     sentences = cleaned_text.split('. ')

@@ -171,14 +171,11 @@ class Command(BaseCommand):
                                 ])
                         except Exception as e:
                             logger.warning(f"Job posting parser failed for {job_obj.title}: {e}")
-                        # Also run process_job_description for team_description, benefits, etc.
+                        # Also run process_job_description for benefits, etc.
                         try:
                             processed = process_job_description(job_obj.description)
                             if processed:
                                 updated = False
-                                if processed.get("team_description"):
-                                    job_obj.team_description = processed.get("team_description")
-                                    updated = True
                                 if processed.get("benefits"):
                                     job_obj.benefits = processed.get("benefits")
                                     updated = True
@@ -192,7 +189,7 @@ class Command(BaseCommand):
                                     updated = True
                                 if updated:
                                     job_obj.save(update_fields=[
-                                        "team_description", "benefits", "structured_description"
+                                        "benefits", "structured_description"
                                     ])
                         except Exception as e:
                             logger.warning(f"Failed to process job description for {job_obj.title}: {e}")

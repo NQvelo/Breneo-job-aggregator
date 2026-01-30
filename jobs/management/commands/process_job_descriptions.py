@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Process job descriptions to extract responsibilities, qualifications, team_description, and benefits"
+    help = "Process job descriptions to extract responsibilities, qualifications, and benefits"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -38,7 +38,6 @@ class Command(BaseCommand):
                 models.Q(responsibilities='') |
                 models.Q(qualifications__isnull=True) | 
                 models.Q(qualifications='') |
-                models.Q(team_description__isnull=True) |
                 models.Q(benefits__isnull=True)
             )
         
@@ -72,11 +71,6 @@ class Command(BaseCommand):
                         job.qualifications = processed_data.get('qualifications')
                         updated = True
                     
-                    # Update team_description
-                    if processed_data.get('team_description'):
-                        job.team_description = processed_data.get('team_description')
-                        updated = True
-                    
                     # Update benefits
                     if processed_data.get('benefits'):
                         job.benefits = processed_data.get('benefits')
@@ -96,7 +90,7 @@ class Command(BaseCommand):
                     if updated:
                         job.save(update_fields=[
                             'responsibilities', 'qualifications', 
-                            'team_description', 'benefits', 'structured_description'
+                            'benefits', 'structured_description'
                         ])
                         processed += 1
                         self.stdout.write(f"  ✓ Processed: {job.title} @ {job.company.name}")

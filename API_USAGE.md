@@ -171,7 +171,6 @@ This will show:
       "description": "...",
       "responsibilities": "...",
       "qualifications": "...",
-      "team_description": "...",
       "benefits": "...",
       "posted_at": "2026-01-15T00:00:00Z",
       "fetched_at": "2026-01-15T14:30:00Z",

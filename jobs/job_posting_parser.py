@@ -457,6 +457,30 @@ def _fallback_bullet_items_from_text(text: str, max_items: int = 8) -> list[str]
     return _dedupe_items(items)[:max_items]
 
 
+_JOB_DESC_MAX_CHARS = 600
+
+# Patterns to strip from job description (pay, location constraints, EEO/legal text)
+_JOB_DESC_EXCLUDE_PATTERNS = [
+    r'\$[\d,]+(?:k|K)?(?:\s*[-–—]\s*\$?[\d,]+(?:k|K)?)?',
+    r'\d+\s*[-–—]\s*\d+\s*(?:k|K)\s*(?:USD|EUR|salary|pay)?',
+    r'\b(?:usd|eur|gbp)\s*[\d,]+\s*[-–—]',
+    r'\b(?:remote|hybrid|onsite|in-office)\b.*\b(?:only|eligible|required|must)\b',
+    r'\b(?:equal opportunity|eeo|affirmative action|inclusion|accommodation)\b',
+    r'\b(?:privacy policy|legal notice|disclaimer|applicant)\b',
+    r'\b(?:pay transparency|salary transparency)\b',
+]
+
+
+def _strip_excluded_from_text(text: str) -> str:
+    """Remove pay, location constraints, EEO/legal phrases from text."""
+    if not text or not text.strip():
+        return text
+    result = text
+    for pattern in _JOB_DESC_EXCLUDE_PATTERNS:
+        result = re.sub(pattern, ' ', result, flags=re.IGNORECASE)
+    return re.sub(r'\s+', ' ', result).strip()
+
+
 def _first_n_sentences(text: str, n: int = 4, min_chars: int = 80) -> str:
     """Extract first n sentences from text (by splitting on . ! ?)."""
     if not text or not text.strip():
@@ -472,9 +496,30 @@ def _first_n_sentences(text: str, n: int = 4, min_chars: int = 80) -> str:
     return result.strip()
 
 
+def _trim_to_max_chars_at_sentence(text: str, max_chars: int = _JOB_DESC_MAX_CHARS) -> str:
+    """Trim text to max_chars at sentence boundaries."""
+    if not text or len(text) <= max_chars:
+        return text.strip()
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    result: list[str] = []
+    length = 0
+    for s in parts:
+        s = s.strip()
+        if not s or len(s) < 10:
+            continue
+        if length + len(s) + 1 <= max_chars:
+            result.append(s)
+            length += len(s) + 1
+        else:
+            break
+    return " ".join(result).strip() if result else text[:max_chars].rsplit('.', 1)[0].strip() + '.'
+
+
 def build_job_description_summary(sections: list[Section]) -> str:
     """
-    Build 2–4 sentence job description from intro/overview/other (non-ignore) sections.
+    Build SHORT, clear job description (2–4 sentences max, ~600 char cap).
+    Excludes: responsibilities/qualifications, pay, location, EEO/legal text.
+    Uses simple language describing what the role does and its impact.
     """
     candidate_parts: list[str] = []
     for sec in sections:
@@ -487,7 +532,12 @@ def build_job_description_summary(sections: list[Section]) -> str:
     combined = " ".join(candidate_parts)
     if not combined.strip():
         return ""
-    return _first_n_sentences(combined, n=4, min_chars=80)
+    # Strip excluded content (pay, location, EEO, etc.)
+    cleaned = _strip_excluded_from_text(combined)
+    if not cleaned:
+        return ""
+    summary = _first_n_sentences(cleaned, n=4, min_chars=60)
+    return _trim_to_max_chars_at_sentence(summary, _JOB_DESC_MAX_CHARS)
 
 
 # ---------------------------------------------------------------------------
@@ -534,10 +584,20 @@ def parse_job_posting(raw_text: str) -> ParsedJobPosting:
     if not job_desc and sections:
         first = sections[0]
         if first.body_text:
-            job_desc = _first_n_sentences(first.body_text, n=4, min_chars=60)
+            cleaned = _strip_excluded_from_text(first.body_text)
+            if cleaned:
+                job_desc = _trim_to_max_chars_at_sentence(
+                    _first_n_sentences(cleaned, n=4, min_chars=60),
+                    _JOB_DESC_MAX_CHARS
+                )
     # Fallback: use full text so we never return empty when raw text exists
     if not job_desc and text.strip():
-        job_desc = _first_n_sentences(text, n=4, min_chars=60)
+        cleaned = _strip_excluded_from_text(text)
+        if cleaned:
+            job_desc = _trim_to_max_chars_at_sentence(
+                _first_n_sentences(cleaned, n=4, min_chars=60),
+                _JOB_DESC_MAX_CHARS
+            )
 
     resp_list = _dedupe_items(responsibilities)[:8]
     qual_list = _dedupe_items(qualifications)[:8]
@@ -588,7 +648,12 @@ def parse_job_posting_for_db(
     if raw:
         preprocessed = preprocess(raw)
         if not summary and preprocessed.strip():
-            summary = _first_n_sentences(preprocessed, n=4, min_chars=60)
+            cleaned = _strip_excluded_from_text(preprocessed)
+            if cleaned:
+                summary = _trim_to_max_chars_at_sentence(
+                    _first_n_sentences(cleaned, n=4, min_chars=60),
+                    _JOB_DESC_MAX_CHARS
+                )
         if not resp_text and preprocessed.strip():
             fallback = _fallback_bullet_items_from_text(preprocessed, max_items=8)
             resp_text = to_bullet_block(fallback)

@@ -92,7 +92,7 @@ Configure them to call a webhook endpoint that triggers job fetching.
 The `fetch_jobs` management command:
 
 - Fetches jobs from all configured companies
-- Processes descriptions and extracts responsibilities, qualifications, team_description, and benefits
+- Processes descriptions and extracts responsibilities, qualifications, and benefits
 - Updates existing jobs and marks inactive ones
 - Automatically formats bullet points
 

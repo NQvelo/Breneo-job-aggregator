@@ -96,12 +96,6 @@ class Job(models.Model):
         help_text="Extracted qualifications/requirements section from job description"
     )
     
-    team_description = models.TextField(
-        blank=True,
-        null=True,
-        help_text="Team description from job posting, if available"
-    )
-    
     benefits = models.TextField(
         blank=True,
         null=True,
@@ -205,20 +199,17 @@ class Job(models.Model):
             except Exception:
                 pass  # If parsing fails, continue without structured description
         
-        # Process job description for team_description, benefits, and other structured fields
+        # Process job description for benefits and other structured fields
         if self.description:
             from .utils import process_job_description
             try:
                 needs_processing = (
-                    not self.team_description or
                     not self.benefits or
                     not self.structured_description
                 )
                 if needs_processing:
                     processed = process_job_description(self.description)
                     if processed:
-                        if processed.get("team_description") and not self.team_description:
-                            self.team_description = processed.get("team_description")
                         if processed.get("benefits") and not self.benefits:
                             self.benefits = processed.get("benefits")
                         if not self.structured_description:

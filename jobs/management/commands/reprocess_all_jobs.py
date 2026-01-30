@@ -67,8 +67,6 @@ class Command(BaseCommand):
                         job.responsibilities = result['responsibilities']
                     if result.get('qualifications'):
                         job.qualifications = result['qualifications']
-                    if result.get('team_description'):
-                        job.team_description = result.get('team_description')
                     if result.get('benefits'):
                         job.benefits = result.get('benefits')
                     

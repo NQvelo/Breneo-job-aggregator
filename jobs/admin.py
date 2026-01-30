@@ -44,14 +44,14 @@ class CompanyAdmin(admin.ModelAdmin):
 class JobAdmin(admin.ModelAdmin):
     list_display = ("title", "get_company_name", "location", "platform", "posted_at", "is_active")
     list_filter = ("platform", "company", "is_active")
-    search_fields = ("title", "company__name", "location", "description", "responsibilities", "qualifications", "team_description", "benefits")
+    search_fields = ("title", "company__name", "location", "description", "responsibilities", "qualifications", "benefits")
     ordering = ("-posted_at", "-fetched_at")
     fieldsets = (
         ("Basic Information", {
             "fields": ("title", "company", "location", "platform", "external_job_id")
         }),
         ("Job Details", {
-            "fields": ("description", "responsibilities", "qualifications", "team_description", "benefits", "apply_url")
+            "fields": ("description", "responsibilities", "qualifications", "benefits", "apply_url")
         }),
         ("Metadata", {
             "fields": ("posted_at", "fetched_at", "is_active", "raw"),
