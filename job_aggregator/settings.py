@@ -18,9 +18,9 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    ".onrender.com",  # allow all subdomains of onrender.com
-    "dashboard.breneo.app" # Our domain
-    "http://localhost:8081",
+    "localhost:8081",
+    ".onrender.com",
+    "dashboard.breneo.app",
 ]
 
 # ---------------------------
@@ -50,6 +50,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -139,12 +140,14 @@ USE_TZ = True
 # STATIC & MEDIA FILES
 # ---------------------------
 STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'  # required for collectstatic
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Optional: extra static folders
-STATICFILES_DIRS = [
-    BASE_DIR / 'static',
-]
+# WhiteNoise for serving static files in production
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Optional: extra static folders (only if directory exists)
+_static_dir = BASE_DIR / 'static'
+STATICFILES_DIRS = [_static_dir] if _static_dir.exists() else []
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
