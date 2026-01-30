@@ -60,67 +60,15 @@ def parse_date(date_str):
         return None
 
 
-def summarize_text(text, max_length=500, min_length=100):
-    """
-    Summarize text using intelligent text truncation.
-    """
-    if not text or len(text.strip()) < 100:
-        return text
-    
-    return _fallback_summarize(text, max_length, min_length)
-
-
-
-def _fallback_summarize(text, max_length=150, min_length=50):
-    """Intelligent text truncation fallback."""
-    if len(text) > max_length:
-        # Try to find a good breaking point
-        sentences = text.split('. ')
-        summary_parts = []
-        current_length = 0
-        
-        for sentence in sentences:
-            if current_length + len(sentence) + 2 <= max_length:
-                summary_parts.append(sentence)
-                current_length += len(sentence) + 2
-            else:
-                break
-        
-        if summary_parts:
-            truncated = '. '.join(summary_parts)
-            if len(truncated) >= min_length:
-                return truncated + '.'
-        
-        # If sentence-based truncation didn't work, just truncate at word boundary
-        words = text.split()
-        truncated_words = []
-        current_length = 0
-        
-        for word in words:
-            if current_length + len(word) + 1 <= max_length:
-                truncated_words.append(word)
-                current_length += len(word) + 1
-            else:
-                break
-        
-        if truncated_words:
-            return ' '.join(truncated_words) + '...'
-    
-    # Return original if truncation didn't help
-    return text
-
-
-def extract_responsibilities_and_qualifications(description_text, summarize=True):
+def extract_responsibilities_and_qualifications(description_text):
     """
     Extract responsibilities and qualifications from job description using AI.
-    Uses Hugging Face models for extraction and optionally summarizes the results.
     
     Args:
         description_text: Full job description text
-        summarize: Whether to summarize the extracted text (default: True)
         
     Returns:
-        tuple: (responsibilities_text, qualifications_text) - both may be summarized
+        tuple: (responsibilities_text, qualifications_text)
     """
     if not description_text:
         return None, None
@@ -141,13 +89,6 @@ def extract_responsibilities_and_qualifications(description_text, summarize=True
                 qualifications = ai_qualifications
         except Exception as e:
             logger.warning(f"AI extraction failed: {e}. Using pattern matching results only.")
-    
-    # Summarize the extracted text if requested and text is long enough
-    if summarize:
-        if responsibilities and len(responsibilities) > 200:
-            responsibilities = summarize_text(responsibilities, max_length=200, min_length=50)
-        if qualifications and len(qualifications) > 200:
-            qualifications = summarize_text(qualifications, max_length=200, min_length=50)
     
     return responsibilities, qualifications
 

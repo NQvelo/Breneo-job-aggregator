@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import models as django_models
 from jobs.models import Job
-from jobs.utils import extract_responsibilities_and_qualifications, summarize_text
+from jobs.utils import extract_responsibilities_and_qualifications
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,24 +27,11 @@ class Command(BaseCommand):
             default=None,
             help='Limit number of jobs to process',
         )
-        parser.add_argument(
-            '--summarize',
-            action='store_true',
-            default=True,
-            help='Summarize extracted responsibilities and qualifications (default: True)',
-        )
-        parser.add_argument(
-            '--no-summarize',
-            dest='summarize',
-            action='store_false',
-            help='Do not summarize extracted text',
-        )
 
     def handle(self, *args, **options):
         dry_run = options.get('dry_run', False)
         force = options.get('force', False)
         limit = options.get('limit')
-        summarize = options.get('summarize', True)
         
         # Get jobs to process
         if force:
@@ -75,18 +62,10 @@ class Command(BaseCommand):
                 if not job.description:
                     continue
                 
-                # Extract and optionally summarize
+                # Extract responsibilities and qualifications
                 responsibilities, qualifications = extract_responsibilities_and_qualifications(
-                    job.description, 
-                    summarize=summarize
+                    job.description
                 )
-                
-                # If not summarizing during extraction, summarize existing long text
-                if not summarize:
-                    if responsibilities and len(responsibilities) > 300:
-                        responsibilities = summarize_text(responsibilities, max_length=200, min_length=50)
-                    if qualifications and len(qualifications) > 300:
-                        qualifications = summarize_text(qualifications, max_length=200, min_length=50)
                 
                 if dry_run:
                     if responsibilities or qualifications:

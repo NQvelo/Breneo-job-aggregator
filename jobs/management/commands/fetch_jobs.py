@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction, connection
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description
+from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs import fetchers
 import logging
 import sys
@@ -147,47 +148,51 @@ class Command(BaseCommand):
                         },
                     )
                     
-                    # Process job description to extract structured fields (responsibilities, qualifications, team_description, benefits)
-                    # This ensures AI extraction happens during fetch, even if fields already exist
+                    # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary)
                     if job_obj.description:
+                        try:
+                            parsed = parse_job_posting_for_db(job_obj.description)
+                            updated = False
+                            if parsed.get("responsibilities"):
+                                job_obj.responsibilities = parsed["responsibilities"]
+                                updated = True
+                            if parsed.get("qualifications"):
+                                job_obj.qualifications = parsed["qualifications"]
+                                updated = True
+                            if parsed.get("job_description_summary"):
+                                if not job_obj.structured_description:
+                                    job_obj.structured_description = {}
+                                if isinstance(job_obj.structured_description, dict):
+                                    job_obj.structured_description["summary"] = parsed["job_description_summary"]
+                                    updated = True
+                            if updated:
+                                job_obj.save(update_fields=[
+                                    "responsibilities", "qualifications", "structured_description"
+                                ])
+                        except Exception as e:
+                            logger.warning(f"Job posting parser failed for {job_obj.title}: {e}")
+                        # Also run process_job_description for team_description, benefits, etc.
                         try:
                             processed = process_job_description(job_obj.description)
                             if processed:
-                                # Always update if we have processed data (to ensure latest extraction)
                                 updated = False
-                                
-                                if processed.get('responsibilities'):
-                                    job_obj.responsibilities = processed.get('responsibilities')
+                                if processed.get("team_description"):
+                                    job_obj.team_description = processed.get("team_description")
                                     updated = True
-                                
-                                if processed.get('qualifications'):
-                                    job_obj.qualifications = processed.get('qualifications')
+                                if processed.get("benefits"):
+                                    job_obj.benefits = processed.get("benefits")
                                     updated = True
-                                
-                                if processed.get('team_description'):
-                                    job_obj.team_description = processed.get('team_description')
-                                    updated = True
-                                
-                                if processed.get('benefits'):
-                                    job_obj.benefits = processed.get('benefits')
-                                    updated = True
-                                
-                                # Update structured_description
                                 if not job_obj.structured_description:
                                     job_obj.structured_description = {}
                                 if isinstance(job_obj.structured_description, dict):
                                     job_obj.structured_description.update({
-                                        'summary': processed.get('summary'),
-                                        'company_overview': processed.get('company_overview'),
-                                        'role_description': processed.get('role_description'),
+                                        "company_overview": processed.get("company_overview"),
+                                        "role_description": processed.get("role_description"),
                                     })
                                     updated = True
-                                
-                                # Save if we updated any fields
                                 if updated:
                                     job_obj.save(update_fields=[
-                                        'responsibilities', 'qualifications', 
-                                        'team_description', 'benefits', 'structured_description'
+                                        "team_description", "benefits", "structured_description"
                                     ])
                         except Exception as e:
                             logger.warning(f"Failed to process job description for {job_obj.title}: {e}")
@@ -223,6 +228,17 @@ class Command(BaseCommand):
 
         # Final commit to ensure all changes are persisted
         transaction.commit()
+
+        # Delete inactive jobs from the dataset (no longer in feeds)
+        try:
+            deleted_count, _ = Job.objects.filter(is_active=False).delete()
+            if deleted_count > 0:
+                transaction.commit()
+                self.stdout.write(self.style.WARNING(f"  🗑 Deleted {deleted_count} inactive job(s) from the dataset"))
+                logger.info("Deleted %d inactive jobs from the dataset", deleted_count)
+        except Exception as e:
+            logger.exception("Failed to delete inactive jobs: %s", e)
+            self.stdout.write(self.style.WARNING(f"  ⚠ Could not delete inactive jobs: {e}"))
         
         # Verify jobs were actually saved to database
         try:
