@@ -3,6 +3,35 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Matching field enums for job-user matching system
+WORK_MODE_CHOICES = [
+    ("remote", "Remote"),
+    ("hybrid", "Hybrid"),
+    ("onsite", "On-site"),
+    ("unknown", "Unknown"),
+]
+
+SENIORITY_CHOICES = [
+    ("intern", "Intern"),
+    ("junior", "Junior"),
+    ("mid", "Mid"),
+    ("senior", "Senior"),
+    ("lead", "Lead"),
+    ("unknown", "Unknown"),
+]
+
+VISA_SPONSORSHIP_CHOICES = [
+    ("yes", "Yes"),
+    ("no", "No"),
+    ("unknown", "Unknown"),
+]
+
+WORK_AUTH_CHOICES = [
+    ("yes", "Yes"),
+    ("no", "No"),
+    ("unknown", "Unknown"),
+]
+
 
 class Company(models.Model):
     name = models.CharField(max_length=200, unique=True)
@@ -81,6 +110,14 @@ class Job(models.Model):
 
     # Location fields
     location = models.CharField(max_length=200, blank=True, null=True)
+    # Normalized country for matching/filtering (parsed from location)
+    location_country = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Country parsed from location for job-user matching",
+    )
 
     # Workplace type: Remote, Hybrid, On-site (extracted from job info)
     workplace_type = models.CharField(
@@ -96,6 +133,99 @@ class Job(models.Model):
         blank=True,
         help_text="List of required skills extracted from job posting",
     )
+
+    # === MATCHING CORE FIELDS (for job-user matching system) ===
+    # Normalized work mode enum for structured matching
+    work_mode = models.CharField(
+        max_length=20,
+        choices=WORK_MODE_CHOICES,
+        default="unknown",
+        db_index=True,
+        help_text="Work mode: remote, hybrid, onsite, or unknown",
+    )
+    # Seniority level for experience-based matching
+    seniority = models.CharField(
+        max_length=20,
+        choices=SENIORITY_CHOICES,
+        default="unknown",
+        db_index=True,
+        help_text="Seniority: intern, junior, mid, senior, lead, or unknown",
+    )
+    # Role category for domain matching (frontend, backend, data, etc.)
+    role_category = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Role category inferred from title+skills: frontend, backend, data",
+    )
+    # Minimum years of experience when explicitly stated
+    min_years_experience = models.IntegerField(
+        blank=True,
+        null=True,
+        help_text="Minimum years of experience required (NULL if unknown)",
+    )
+
+    # === SKILLS ARRAYS (separate from skills_required for explicit required vs preferred) ===
+    skills_preferred = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Preferred/nice-to-have skills",
+    )
+    tech_stack = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Technologies and tools used in the role",
+    )
+    # Unknown tech-like tokens for catalog expansion (not auto-added to skills)
+    tech_stack_candidates = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Tech-like tokens not in catalog, for review/expansion",
+    )
+
+    # Languages required (formatted as "English C1", "German B2", etc.)
+    languages_required = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Languages with CEFR level when mentioned (e.g. English C1)",
+    )
+
+    # === LEGAL / CONSTRAINTS ===
+    visa_sponsorship = models.CharField(
+        max_length=20,
+        choices=VISA_SPONSORSHIP_CHOICES,
+        default="unknown",
+        help_text="Whether visa sponsorship is offered",
+    )
+    work_authorization_required = models.CharField(
+        max_length=20,
+        choices=WORK_AUTH_CHOICES,
+        default="unknown",
+        help_text="Whether work authorization is required",
+    )
+
+    # === AI / SEMANTIC MATCHING ===
+    # Concatenated text for embedding generation
+    embedding_text = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Text used for semantic embedding (title + skills + languages)",
+    )
+    # Vector stored as JSON list of floats (DB-agnostic; use pgvector for native vectors)
+    embedding_vector = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Semantic embedding vector as list of floats",
+    )
+
+    # === QUALITY / CONTROL ===
+    data_completeness_score = models.IntegerField(
+        default=0,
+        help_text="Completeness score 0-100 for downranking low-quality jobs",
+    )
+    is_low_quality = models.BooleanField(default=False)
+    is_duplicate = models.BooleanField(default=False)
 
     description = models.TextField(blank=True, null=True)
     
@@ -129,7 +259,7 @@ class Job(models.Model):
         help_text="Job ID from external platform",
     )
 
-    posted_at = models.DateTimeField(blank=True, null=True)
+    posted_at = models.DateTimeField(blank=True, null=True, db_index=True)
     fetched_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
 
@@ -150,6 +280,23 @@ class Job(models.Model):
 
     def __str__(self):
         return f"{self.title} @ {self.company.name}"
+
+    def get_description_short(self, max_lines: int = 4, max_chars: int = 400) -> str:
+        """Short summary for table/list display: ~4 lines max. Uses parsed summary if available."""
+        if not self.description and not self.structured_description:
+            return ""
+        summary = None
+        if self.structured_description and isinstance(self.structured_description, dict):
+            summary = self.structured_description.get("summary") or ""
+        if summary and summary.strip():
+            lines = [ln.strip() for ln in summary.strip().split("\n") if ln.strip()][:max_lines]
+            text = "\n".join(lines)
+            return text[:max_chars] + ("..." if len(text) > max_chars else "")
+        if not self.description:
+            return ""
+        lines = [ln.strip() for ln in self.description.strip().split("\n") if ln.strip()][:max_lines]
+        text = "\n".join(lines)
+        return text[:max_chars] + ("..." if len(text) > max_chars else "")
 
     def save(self, *args, **kwargs):
         # Clean description to ensure it's plain text (safety net)
@@ -257,6 +404,42 @@ class Job(models.Model):
                             })
             except Exception as e:
                 logger.warning(f"Failed to process job description: {e}")
+
+        # Populate matching fields from title + description (catalog-based extraction)
+        # Regenerate when title/description available and (new job OR derived fields empty)
+        _should_normalize = self.title and (
+            not self.pk
+            or not self.skills_required
+            or self.work_mode == "unknown"
+            or not self.role_category
+        )
+        if _should_normalize and (self.description or self.qualifications):
+            try:
+                from .job_normalizer import normalize_job_fields
+                norm = normalize_job_fields(
+                    title=self.title,
+                    description_raw=self.description,
+                    location=self.location,
+                    qualifications_text=self.qualifications,
+                )
+                self.work_mode = norm.get("work_mode", "unknown")
+                self.seniority = norm.get("seniority", "unknown")
+                self.role_category = norm.get("role_category")
+                self.min_years_experience = norm.get("min_years_experience")
+                self.skills_required = norm.get("skills_required") or []
+                self.skills_preferred = norm.get("skills_preferred") or []
+                self.tech_stack = norm.get("tech_stack") or []
+                self.tech_stack_candidates = norm.get("tech_stack_candidates") or []
+                self.languages_required = norm.get("languages_required") or []
+                self.embedding_text = norm.get("embedding_text")
+                self.data_completeness_score = norm.get("data_completeness_score", 0)
+                self.location_country = norm.get("location_country")
+                # Keep visa/auth from matching_normalizer if needed (job_normalizer doesn't extract these)
+                from .matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
+                self.visa_sponsorship = extract_visa_sponsorship(self.description) or "unknown"
+                self.work_authorization_required = extract_work_authorization_required(self.description) or "unknown"
+            except Exception as e:
+                logger.warning(f"Job normalizer failed: {e}")
         
         super().save(*args, **kwargs)
 

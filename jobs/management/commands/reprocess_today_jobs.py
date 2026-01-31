@@ -1,7 +1,8 @@
 """
 Reprocess job description parsing for jobs fetched today.
 Replaces existing parsed data (responsibilities, qualifications, summary, benefits)
-with freshly parsed values from the raw description.
+and populates matching fields (work_mode, seniority, role_category, skills_required,
+skills_preferred, tech_stack, etc.) from the job normalizer.
 """
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -9,6 +10,8 @@ from django.utils import timezone
 from jobs.models import Job
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.utils import process_job_description
+from jobs.job_normalizer import normalize_job_fields
+from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 
 
 class Command(BaseCommand):
@@ -72,6 +75,28 @@ class Command(BaseCommand):
                             "role_description": processed.get("role_description"),
                         })
 
+                # 3) Matching fields (work_mode, seniority, role_category, skills, tech_stack, etc.)
+                norm = normalize_job_fields(
+                    title=job.title,
+                    description_raw=job.description,
+                    location=job.location,
+                    qualifications_text=job.qualifications,
+                )
+                job.work_mode = norm.get("work_mode", "unknown")
+                job.seniority = norm.get("seniority", "unknown")
+                job.role_category = norm.get("role_category")
+                job.min_years_experience = norm.get("min_years_experience")
+                job.skills_required = norm.get("skills_required") or []
+                job.skills_preferred = norm.get("skills_preferred") or []
+                job.tech_stack = norm.get("tech_stack") or []
+                job.tech_stack_candidates = norm.get("tech_stack_candidates") or []
+                job.languages_required = norm.get("languages_required") or []
+                job.embedding_text = norm.get("embedding_text")
+                job.data_completeness_score = norm.get("data_completeness_score", 0)
+                job.location_country = norm.get("location_country")
+                job.visa_sponsorship = extract_visa_sponsorship(job.description) or "unknown"
+                job.work_authorization_required = extract_work_authorization_required(job.description) or "unknown"
+
                 job.save(
                     update_fields=[
                         "responsibilities",
@@ -80,6 +105,19 @@ class Command(BaseCommand):
                         "skills_required",
                         "benefits",
                         "structured_description",
+                        "work_mode",
+                        "seniority",
+                        "role_category",
+                        "min_years_experience",
+                        "skills_preferred",
+                        "tech_stack",
+                        "tech_stack_candidates",
+                        "languages_required",
+                        "embedding_text",
+                        "data_completeness_score",
+                        "location_country",
+                        "visa_sponsorship",
+                        "work_authorization_required",
                     ]
                 )
                 updated += 1

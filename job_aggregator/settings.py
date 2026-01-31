@@ -117,14 +117,19 @@ if DATABASE_URL:
             'default': {
                 'ENGINE': 'django.db.backends.sqlite3',
                 'NAME': BASE_DIR / 'db.sqlite3',
+                'OPTIONS': {'timeout': 20},
             }
         }
 else:
     # SQLite (local development)
+    # timeout: wait up to 20s if DB is locked (e.g. fetch_jobs or admin save)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+            },
         }
     }
 

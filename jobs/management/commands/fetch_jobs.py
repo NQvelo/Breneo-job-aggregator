@@ -4,6 +4,8 @@ from django.conf import settings as django_settings
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description
 from jobs.job_posting_parser import parse_job_posting_for_db
+from jobs.job_normalizer import normalize_job_fields
+from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs import fetchers
 import logging
 import sys
@@ -207,6 +209,38 @@ class Command(BaseCommand):
                                     ])
                         except Exception as e:
                             logger.warning(f"Failed to process job description for {job_obj.title}: {e}")
+
+                    # Always populate matching fields for this fetched job (work_mode, seniority, role_category, skills, etc.)
+                    if job_obj.title and (job_obj.description or job_obj.qualifications):
+                        try:
+                            norm = normalize_job_fields(
+                                title=job_obj.title,
+                                description_raw=job_obj.description,
+                                location=job_obj.location,
+                                qualifications_text=job_obj.qualifications,
+                            )
+                            job_obj.work_mode = norm.get("work_mode", "unknown")
+                            job_obj.seniority = norm.get("seniority", "unknown")
+                            job_obj.role_category = norm.get("role_category")
+                            job_obj.min_years_experience = norm.get("min_years_experience")
+                            job_obj.skills_required = norm.get("skills_required") or []
+                            job_obj.skills_preferred = norm.get("skills_preferred") or []
+                            job_obj.tech_stack = norm.get("tech_stack") or []
+                            job_obj.tech_stack_candidates = norm.get("tech_stack_candidates") or []
+                            job_obj.languages_required = norm.get("languages_required") or []
+                            job_obj.embedding_text = norm.get("embedding_text")
+                            job_obj.data_completeness_score = norm.get("data_completeness_score", 0)
+                            job_obj.location_country = norm.get("location_country")
+                            job_obj.visa_sponsorship = extract_visa_sponsorship(job_obj.description) or "unknown"
+                            job_obj.work_authorization_required = extract_work_authorization_required(job_obj.description) or "unknown"
+                            job_obj.save(update_fields=[
+                                "work_mode", "seniority", "role_category", "min_years_experience",
+                                "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates",
+                                "languages_required", "embedding_text", "data_completeness_score",
+                                "location_country", "visa_sponsorship", "work_authorization_required",
+                            ])
+                        except Exception as e:
+                            logger.warning(f"Matching fields normalizer failed for {job_obj.title}: {e}")
                     
                     total += 1
                     company_job_count += 1

@@ -42,16 +42,20 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ("title", "get_company_name", "location", "workplace_type", "platform", "posted_at", "is_active")
-    list_filter = ("platform", "company", "is_active")
-    search_fields = ("title", "company__name", "location", "workplace_type", "description", "responsibilities", "qualifications", "benefits")
+    list_display = ("title", "get_company_name", "description_short_display", "location", "work_mode", "seniority", "platform", "posted_at", "data_completeness_score", "is_active")
+    list_filter = ("platform", "company", "work_mode", "seniority", "is_active")
+    search_fields = ("title", "company__name", "location", "workplace_type", "description", "responsibilities", "qualifications", "benefits", "role_category")
     ordering = ("-posted_at", "-fetched_at")
     fieldsets = (
         ("Basic Information", {
-            "fields": ("title", "company", "location", "platform", "external_job_id")
+            "fields": ("title", "company", "location", "location_country", "platform", "external_job_id")
         }),
         ("Job Details", {
-            "fields": ("description", "workplace_type", "skills_required", "responsibilities", "qualifications", "benefits", "apply_url")
+            "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "benefits", "apply_url")
+        }),
+        ("Matching Fields", {
+            "fields": ("seniority", "role_category", "min_years_experience", "languages_required", "visa_sponsorship", "work_authorization_required", "embedding_text", "data_completeness_score", "is_low_quality", "is_duplicate"),
+            "classes": ("collapse",)
         }),
         ("Metadata", {
             "fields": ("posted_at", "fetched_at", "is_active", "raw"),
@@ -64,3 +68,13 @@ class JobAdmin(admin.ModelAdmin):
         return obj.company.name if obj.company else "-"
     get_company_name.short_description = "Company"
     get_company_name.admin_order_field = "company__name"
+
+    def description_short_display(self, obj):
+        """Short description for table: max 4 lines."""
+        short = obj.get_description_short(max_lines=4, max_chars=400)
+        if not short:
+            return "-"
+        # Show first line or first ~80 chars in list cell
+        first_line = short.split("\n")[0][:80]
+        return first_line + ("..." if len(short) > 80 else "")
+    description_short_display.short_description = "Description (short)"
