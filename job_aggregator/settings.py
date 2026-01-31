@@ -7,6 +7,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Optional: LinkedIn has no public job API. To use a third-party LinkedIn jobs API (e.g. SerpAPI, Apify),
+# set LINKEDIN_JOBS_API_URL (and optionally LINKEDIN_JOBS_API_KEY) and add a company with platform="linkedin".
+LINKEDIN_JOBS_API_URL = os.environ.get("LINKEDIN_JOBS_API_URL", "")
+LINKEDIN_JOBS_API_KEY = os.environ.get("LINKEDIN_JOBS_API_KEY", "")
+
 # ---------------------------
 # SECURITY
 # ---------------------------
@@ -50,15 +55,20 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+]
+try:
+    import whitenoise  # noqa: F401
+    MIDDLEWARE.append('whitenoise.middleware.WhiteNoiseMiddleware')
+except ImportError:
+    pass
+MIDDLEWARE.extend([
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    
-]
+])
 
 # ---------------------------
 # URLS & WSGI
@@ -142,8 +152,12 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# WhiteNoise for serving static files in production
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# WhiteNoise for serving static files in production (optional - only if installed)
+try:
+    import whitenoise  # noqa: F401
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+except ImportError:
+    pass
 
 # Optional: extra static folders (only if directory exists)
 _static_dir = BASE_DIR / 'static'

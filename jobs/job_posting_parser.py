@@ -418,7 +418,93 @@ def _dedupe_items(items: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# F) JOB DESCRIPTION SUMMARY & FALLBACKS (NEVER EMPTY WHEN RAW TEXT EXISTS)
+# F) WORKPLACE TYPE & SKILLS EXTRACTION
+# ---------------------------------------------------------------------------
+
+# Common tech/professional skills for keyword matching (case-insensitive, word boundaries)
+_SKILLS_KEYWORDS = frozenset([
+    # Languages
+    "python", "javascript", "java", "typescript", "go", "golang", "rust", "c++", "c#",
+    "ruby", "swift", "kotlin", "php", "scala", "r", "sql", "html", "css", "solidity",
+    # Frameworks / libraries
+    "react", "angular", "vue", "node.js", "nodejs", "django", "flask", "fastapi",
+    "spring", "spring boot", ".net", "rails", "express", "next.js", "svelte",
+    "redux", "graphql", "rest api", "restful",
+    # Cloud / infrastructure
+    "aws", "gcp", "azure", "docker", "kubernetes", "k8s", "terraform", "ansible",
+    "jenkins", "ci/cd", "github actions", "linux", "kubernetes",
+    # Databases
+    "postgresql", "postgres", "mysql", "mongodb", "redis", "elasticsearch",
+    "dynamodb", "bigquery", "snowflake",
+    # Tools / concepts
+    "git", "agile", "scrum", "machine learning", "ml", "data science",
+    "api", "microservices", "test driven development", "tdd",
+])
+
+
+def extract_workplace_type(description: str, location: str = "") -> str | None:
+    """
+    Extract workplace type (Remote, Hybrid, On-site) from description and location.
+    Checks location first (e.g. "Remote" in location), then description.
+    """
+    combined = f"{location or ''} {description or ''}".lower()
+    if not combined.strip():
+        return None
+    # Order matters: "remote" can appear in "remote-first hybrid" - prefer remote if present
+    if re.search(r'\bremote\b', combined) or "work from home" in combined or "wfh" in combined:
+        return "Remote"
+    if re.search(r'\bhybrid\b', combined) or "in-office" in combined and "remote" in combined:
+        return "Hybrid"
+    if re.search(r'\b(on-?site|in-?office|onsite)\b', combined) or "in-person" in combined:
+        return "On-site"
+    # Location often says "Remote" explicitly
+    if location and "remote" in location.lower():
+        return "Remote"
+    return None
+
+
+def extract_skills_required(description: str) -> list[str]:
+    """
+    Extract skill keywords from job description.
+    Returns a deduplicated list of skills (max 20), preserving original casing from text.
+    """
+    if not description or not description.strip():
+        return []
+    text_lower = description.lower()
+    found: list[str] = []
+    seen: set[str] = set()
+    # Match multi-word skills first to avoid partial matches
+    for skill in sorted(_SKILLS_KEYWORDS, key=len, reverse=True):
+        if len(found) >= 20:
+            break
+        if skill in seen:
+            continue
+        # Word-boundary style match (skill as whole word)
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, text_lower):
+            seen.add(skill)
+            # Preserve casing from first occurrence in text
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match:
+                found.append(match.group(0))
+            else:
+                found.append(skill.title())
+    return found
+
+
+def extract_workplace_type_and_skills(
+    description: str,
+    location: str = "",
+) -> dict[str, Any]:
+    """Extract workplace_type and skills_required from job info. For Job model use."""
+    return {
+        "workplace_type": extract_workplace_type(description, location),
+        "skills_required": extract_skills_required(description or ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# G) JOB DESCRIPTION SUMMARY & FALLBACKS (NEVER EMPTY WHEN RAW TEXT EXISTS)
 # ---------------------------------------------------------------------------
 
 
@@ -618,18 +704,19 @@ def parse_job_posting_for_db(
     *,
     bullet: str = "• ",
     use_short_description: bool = False,
+    location: str = "",
 ) -> dict[str, Any]:
     """
     Parse raw job posting and return a dict ready for Job model fields.
 
-    Use this to auto-fill description (optional), responsibilities, and qualifications
-    in the database. Keeps full raw text in description unless use_short_description=True.
+    Use this to auto-fill description (optional), responsibilities, qualifications,
+    workplace_type, and skills_required in the database.
 
     Returns:
         dict with:
-          - job_description_summary: 2–4 sentence summary (for structured_description['summary'])
-          - responsibilities: single string, newline-separated bullets (for Job.responsibilities)
-          - qualifications: single string (for Job.qualifications)
+          - job_description_summary, responsibilities, qualifications
+          - workplace_type: Remote | Hybrid | On-site | None
+          - skills_required: list of skill strings
           - description: short summary only if use_short_description=True, else None
     """
     raw = (raw_text or "").strip()
@@ -661,10 +748,14 @@ def parse_job_posting_for_db(
             fallback = _fallback_bullet_items_from_text(preprocessed, max_items=8)
             qual_text = to_bullet_block(fallback)
 
+    workplace_data = extract_workplace_type_and_skills(raw, location or "")
+
     out: dict[str, Any] = {
         "job_description_summary": summary,
         "responsibilities": resp_text,
         "qualifications": qual_text,
+        "workplace_type": workplace_data["workplace_type"],
+        "skills_required": workplace_data["skills_required"],
     }
     if use_short_description and summary:
         out["description"] = summary

@@ -82,6 +82,21 @@ class Job(models.Model):
     # Location fields
     location = models.CharField(max_length=200, blank=True, null=True)
 
+    # Workplace type: Remote, Hybrid, On-site (extracted from job info)
+    workplace_type = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Workplace type: Remote, Hybrid, or On-site",
+    )
+
+    # Skills required (array of skill strings, extracted from description)
+    skills_required = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of required skills extracted from job posting",
+    )
+
     description = models.TextField(blank=True, null=True)
     
     # Extracted sections from description using AI
@@ -163,11 +178,14 @@ class Job(models.Model):
                 if parsed_date:
                     self.posted_at = parsed_date
         
-        # Parse job posting (robust parser) for responsibilities, qualifications, and summary
-        if self.description and (not self.responsibilities or not self.qualifications):
+        # Parse job posting (robust parser) for responsibilities, qualifications, summary, workplace_type, skills_required
+        if self.description and (
+            not self.responsibilities or not self.qualifications
+            or not self.workplace_type or not self.skills_required
+        ):
             try:
                 from .job_posting_parser import parse_job_posting_for_db
-                parsed = parse_job_posting_for_db(self.description)
+                parsed = parse_job_posting_for_db(self.description, location=self.location or "")
                 if parsed.get("responsibilities") and not self.responsibilities:
                     self.responsibilities = parsed["responsibilities"]
                 if parsed.get("qualifications") and not self.qualifications:
@@ -177,6 +195,10 @@ class Job(models.Model):
                         self.structured_description = {}
                     if isinstance(self.structured_description, dict):
                         self.structured_description["summary"] = parsed["job_description_summary"]
+                if parsed.get("workplace_type") and not self.workplace_type:
+                    self.workplace_type = parsed["workplace_type"]
+                if parsed.get("skills_required") and not self.skills_required:
+                    self.skills_required = parsed["skills_required"]
             except Exception as e:
                 logger.warning(f"Job posting parser failed: {e}. Falling back to utils.")
                 try:
@@ -190,6 +212,19 @@ class Job(models.Model):
                         self.qualifications = qualifications
                 except Exception as e2:
                     logger.warning(f"Fallback extraction failed: {e2}")
+                # Still extract workplace_type and skills_required when main parser failed
+                if not self.workplace_type or not self.skills_required:
+                    try:
+                        from .job_posting_parser import extract_workplace_type_and_skills
+                        extracted = extract_workplace_type_and_skills(
+                            self.description, self.location or ""
+                        )
+                        if extracted.get("workplace_type"):
+                            self.workplace_type = extracted["workplace_type"]
+                        if extracted.get("skills_required"):
+                            self.skills_required = extracted["skills_required"]
+                    except Exception as e3:
+                        logger.warning(f"Workplace/skills extraction failed: {e3}")
         
         # Parse structured description if description exists and structured_description is empty
         if self.description and not self.structured_description:

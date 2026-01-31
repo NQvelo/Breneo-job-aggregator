@@ -47,11 +47,13 @@ class Command(BaseCommand):
 
         for job in jobs:
             try:
-                # 1) Job posting parser (responsibilities, qualifications, summary)
-                parsed = parse_job_posting_for_db(job.description)
+                # 1) Job posting parser (responsibilities, qualifications, summary, workplace_type, skills_required)
+                parsed = parse_job_posting_for_db(job.description, location=job.location or "")
 
                 job.responsibilities = parsed.get("responsibilities") or ""
                 job.qualifications = parsed.get("qualifications") or ""
+                job.workplace_type = parsed.get("workplace_type") or job.workplace_type
+                job.skills_required = parsed.get("skills_required") or []
 
                 if not job.structured_description:
                     job.structured_description = {}
@@ -74,6 +76,8 @@ class Command(BaseCommand):
                     update_fields=[
                         "responsibilities",
                         "qualifications",
+                        "workplace_type",
+                        "skills_required",
                         "benefits",
                         "structured_description",
                     ]

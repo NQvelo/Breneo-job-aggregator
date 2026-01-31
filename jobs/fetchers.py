@@ -320,6 +320,46 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
 
     return jobs
 
+
+def fetch_linkedin(jobs_api_url, company_name, api_key=None, logo=None):
+    """
+    LinkedIn does not provide a public API for job listings. This stub supports an
+    optional external jobs API (e.g. SerpAPI, Apify, or a custom proxy).
+    Set LINKEDIN_JOBS_API_URL (and optionally LINKEDIN_JOBS_API_KEY) in settings/env,
+    and add a company with platform="linkedin" and url=<that API URL>.
+    Returns [] if no URL configured or request fails.
+    """
+    logo = logo or get_logo_url(company_name)
+    if not jobs_api_url:
+        logger.debug("LinkedIn: no jobs API URL configured")
+        return []
+    try:
+        headers = {**HEADERS}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        r = httpx.get(jobs_api_url, headers=headers, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        jobs = []
+        raw_list = data.get("jobs", data.get("results", data)) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        for job in raw_list if isinstance(raw_list, list) else []:
+            jobs.append({
+                "title": job.get("title") or job.get("name") or "",
+                "company": company_name,
+                "location": job.get("location") or job.get("locationName"),
+                "description": clean_html_to_text(job.get("description") or job.get("descriptionHtml") or ""),
+                "apply_url": job.get("url") or job.get("applyUrl") or job.get("link") or "",
+                "posted_at": parse_date(job.get("postedAt") or job.get("publishedAt") or job.get("date")),
+                "platform": "linkedin",
+                "external_job_id": str(job.get("id") or job.get("jobId") or job.get("url", "")),
+                "raw": job,
+                "logo": logo,
+            })
+        return jobs
+    except Exception:
+        logger.exception("LinkedIn jobs API fetch failed for %s", company_name)
+        return []
+
 # import httpx
 # from bs4 import BeautifulSoup
 # from .utils import parse_date, robots_allowed

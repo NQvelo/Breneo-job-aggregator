@@ -2,13 +2,14 @@ from django.core.management.base import BaseCommand
 from django.db import models
 from jobs.models import Job
 from jobs.utils import process_job_description
+from jobs.job_posting_parser import extract_workplace_type_and_skills
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Process job descriptions to extract responsibilities, qualifications, and benefits"
+    help = "Process job descriptions to extract responsibilities, qualifications, benefits, workplace_type, and skills_required"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -34,11 +35,15 @@ class Command(BaseCommand):
             ).exclude(
                 description=''
             ).filter(
-                models.Q(responsibilities__isnull=True) | 
+                models.Q(responsibilities__isnull=True) |
                 models.Q(responsibilities='') |
-                models.Q(qualifications__isnull=True) | 
+                models.Q(qualifications__isnull=True) |
                 models.Q(qualifications='') |
-                models.Q(benefits__isnull=True)
+                models.Q(benefits__isnull=True) |
+                models.Q(workplace_type__isnull=True) |
+                models.Q(workplace_type='') |
+                models.Q(skills_required=[]) |
+                models.Q(skills_required__isnull=True)
             )
         
         if options['limit']:
@@ -54,29 +59,21 @@ class Command(BaseCommand):
             try:
                 if not job.description:
                     continue
-                
-                # Process job description
+
+                updated = False
+                # Process job description (utils)
                 processed_data = process_job_description(job.description)
-                
+
                 if processed_data:
-                    updated = False
-                    
-                    # Update responsibilities
                     if processed_data.get('responsibilities'):
                         job.responsibilities = processed_data.get('responsibilities')
                         updated = True
-                    
-                    # Update qualifications
                     if processed_data.get('qualifications'):
                         job.qualifications = processed_data.get('qualifications')
                         updated = True
-                    
-                    # Update benefits
                     if processed_data.get('benefits'):
                         job.benefits = processed_data.get('benefits')
                         updated = True
-                    
-                    # Update structured_description
                     if not job.structured_description:
                         job.structured_description = {}
                     if isinstance(job.structured_description, dict):
@@ -86,14 +83,24 @@ class Command(BaseCommand):
                             'role_description': processed_data.get('role_description'),
                         })
                         updated = True
-                    
-                    if updated:
-                        job.save(update_fields=[
-                            'responsibilities', 'qualifications', 
-                            'benefits', 'structured_description'
-                        ])
-                        processed += 1
-                        self.stdout.write(f"  ✓ Processed: {job.title} @ {job.company.name}")
+
+                # Extract workplace_type and skills_required
+                extracted = extract_workplace_type_and_skills(job.description, job.location or "")
+                if extracted.get('workplace_type'):
+                    job.workplace_type = extracted['workplace_type']
+                    updated = True
+                if extracted.get('skills_required'):
+                    job.skills_required = extracted['skills_required']
+                    updated = True
+
+                if updated:
+                    job.save(update_fields=[
+                        'responsibilities', 'qualifications',
+                        'benefits', 'structured_description',
+                        'workplace_type', 'skills_required',
+                    ])
+                    processed += 1
+                    self.stdout.write(f"  ✓ Processed: {job.title} @ {job.company.name}")
                 
             except Exception as e:
                 errors += 1

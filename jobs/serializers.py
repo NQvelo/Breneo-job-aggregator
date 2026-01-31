@@ -10,6 +10,7 @@ class JobSerializer(serializers.ModelSerializer):
         model = Job
         fields = [
             'id', 'title', 'company', 'company_logo', 'location',
+            'workplace_type', 'skills_required',
             'description', 'responsibilities', 'qualifications', 'benefits',
             'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
@@ -77,8 +78,9 @@ class NestedJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'location', 'description', 'responsibilities', 'qualifications',
-            'benefits', 'apply_url', 'platform', 'external_job_id', 
+            'id', 'title', 'company', 'location', 'workplace_type', 'skills_required',
+            'description', 'responsibilities', 'qualifications', 'benefits',
+            'apply_url', 'platform', 'external_job_id',
             'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
@@ -173,6 +175,8 @@ def job_to_dict(job):
             "title": job.title,
             "company": job.company,
             "location": job.location,
+            "workplace_type": job.workplace_type,
+            "skills_required": job.skills_required or [],
             "description": job.description,
             "responsibilities": job.responsibilities,
             "qualifications": job.qualifications,
@@ -191,6 +195,8 @@ def job_to_dict(job):
             "title": job.get("title"),
             "company": job.get("company"),
             "location": job.get("location"),
+            "workplace_type": job.get("workplace_type"),
+            "skills_required": job.get("skills_required") or [],
             "description": job.get("description"),
             "responsibilities": job.get("responsibilities"),
             "qualifications": job.get("qualifications"),

@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction, connection
+from django.conf import settings as django_settings
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description
 from jobs.job_posting_parser import parse_job_posting_for_db
@@ -37,7 +38,8 @@ COMPANIES = [
     {"name": "Reddit", "platform": "greenhouse", "handle": "reddit"},
     # Note: Apple removed - they use a custom ATS system with no public API or RSS feed
     # Note: Google and Meta removed due to ToS concerns - they don't provide official APIs
-    # and scraping their career pages likely violates their Terms of Service
+    # LinkedIn: no public API. To use a third-party API, set LINKEDIN_JOBS_API_URL (and optional KEY) and add:
+    # {"name": "LinkedIn Jobs", "platform": "linkedin", "url": "<your API URL>"}
 ]
 
 # Map platform to fetcher function
@@ -50,6 +52,7 @@ PLATFORM_TO_FETCHER = {
     "jobs.ge": fetchers.fetch_jobs_ge_listings,
     "career_page": fetchers.fetch_generic_career_page,
     "ashby": fetchers.fetch_ashby,
+    "linkedin": fetchers.fetch_linkedin,
 }
 
 class Command(BaseCommand):
@@ -108,6 +111,10 @@ class Command(BaseCommand):
             try:
                 if platform in ("greenhouse", "lever", "workable", "smartrecruiters", "ashby"):
                     jobs_data = fetcher(comp.get("handle"), company_name)
+                elif platform == "linkedin":
+                    api_url = comp.get("url") or getattr(django_settings, "LINKEDIN_JOBS_API_URL", None)
+                    api_key = comp.get("api_key") or getattr(django_settings, "LINKEDIN_JOBS_API_KEY", None)
+                    jobs_data = fetcher(api_url, company_name, api_key=api_key) if api_url else []
                 else:
                     jobs_data = fetcher(comp.get("url") or comp.get("handle"), company_name)
             except Exception as e:
@@ -148,10 +155,10 @@ class Command(BaseCommand):
                         },
                     )
                     
-                    # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary)
+                    # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary, workplace_type, skills_required)
                     if job_obj.description:
                         try:
-                            parsed = parse_job_posting_for_db(job_obj.description)
+                            parsed = parse_job_posting_for_db(job_obj.description, location=job_obj.location or "")
                             updated = False
                             if parsed.get("responsibilities"):
                                 job_obj.responsibilities = parsed["responsibilities"]
@@ -165,9 +172,16 @@ class Command(BaseCommand):
                                 if isinstance(job_obj.structured_description, dict):
                                     job_obj.structured_description["summary"] = parsed["job_description_summary"]
                                     updated = True
+                            if parsed.get("workplace_type"):
+                                job_obj.workplace_type = parsed["workplace_type"]
+                                updated = True
+                            if parsed.get("skills_required"):
+                                job_obj.skills_required = parsed["skills_required"]
+                                updated = True
                             if updated:
                                 job_obj.save(update_fields=[
-                                    "responsibilities", "qualifications", "structured_description"
+                                    "responsibilities", "qualifications", "structured_description",
+                                    "workplace_type", "skills_required",
                                 ])
                         except Exception as e:
                             logger.warning(f"Job posting parser failed for {job_obj.title}: {e}")
