@@ -1,9 +1,30 @@
+
 from rest_framework import serializers
 from .models import Job, Company
 from datetime import datetime
 
+class DynamicFieldsModelSerializer(serializers.ModelSerializer):
+    """
+    A ModelSerializer that takes an additional `fields` argument that
+    controls which fields should be displayed.
+    """
 
-class JobSerializer(serializers.ModelSerializer):
+    def __init__(self, *args, **kwargs):
+        # Don't pass the 'fields' arg up to the superclass
+        fields = kwargs.pop('fields', None)
+
+        # Instantiate the superclass normally
+        super(DynamicFieldsModelSerializer, self).__init__(*args, **kwargs)
+
+        if fields is not None:
+            # Drop any fields that are not specified in the `fields` argument.
+            allowed = set(fields)
+            existing = set(self.fields)
+            for field_name in existing - allowed:
+                self.fields.pop(field_name)
+
+
+class JobSerializer(DynamicFieldsModelSerializer):
     company_logo = serializers.SerializerMethodField()
     description_short = serializers.SerializerMethodField()
 
@@ -37,7 +58,7 @@ class JobSerializer(serializers.ModelSerializer):
         return None
 
 
-class CompanyInfoSerializer(serializers.ModelSerializer):
+class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     """Serializer for company information nested within job responses"""
     logo = serializers.SerializerMethodField()
     
@@ -78,7 +99,7 @@ class CompanyInfoSerializer(serializers.ModelSerializer):
         return representation
 
 
-class NestedJobSerializer(serializers.ModelSerializer):
+class NestedJobSerializer(DynamicFieldsModelSerializer):
     """Serializer for jobs nested within company data"""
     company = CompanyInfoSerializer(read_only=True)
     description_short = serializers.SerializerMethodField()
@@ -100,7 +121,7 @@ class NestedJobSerializer(serializers.ModelSerializer):
         return obj.get_description_short(max_lines=4, max_chars=400)
 
 
-class CompanyDetailSerializer(serializers.ModelSerializer):
+class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     """Serializer for company details with all fields"""
     logo = serializers.SerializerMethodField()
     job_count = serializers.SerializerMethodField()

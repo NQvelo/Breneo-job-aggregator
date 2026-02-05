@@ -1,0 +1,629 @@
+openapi: 3.0.3
+info:
+  title: ''
+  version: 0.0.0
+paths:
+  /api/:
+    get:
+      operationId: root_retrieve
+      description: |-
+        Returns jobs grouped by company.
+        Only returns companies that have active jobs.
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/companies:
+    get:
+      operationId: companies_retrieve
+      description: |-
+        Get detailed information for a specific company.
+        Query parameters:
+        - name: Company name (case-insensitive search)
+        - id: Company ID (alternative to name)
+
+        URL path parameter:
+        - company_name: Company name in URL path (e.g., /api/companies/Airbnb)
+      tags:
+      - companies
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/companies/{company_name}:
+    get:
+      operationId: companies_retrieve_2
+      description: |-
+        Get detailed information for a specific company.
+        Query parameters:
+        - name: Company name (case-insensitive search)
+        - id: Company ID (alternative to name)
+
+        URL path parameter:
+        - company_name: Company name in URL path (e.g., /api/companies/Airbnb)
+      parameters:
+      - in: path
+        name: company_name
+        schema:
+          type: string
+        required: true
+      tags:
+      - companies
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/job-details:
+    get:
+      operationId: job_details_retrieve
+      description: |-
+        Get detailed information for a specific job.
+        Query parameters:
+        - job_id: Job ID (can be primary key ID or external_job_id, optionally URL-encoded)
+      tags:
+      - job-details
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/schema/:
+    get:
+      operationId: schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - ht
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - schema
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/search:
+    get:
+      operationId: search_retrieve
+      description: |-
+        Search endpoint for jobs with NLP-based filtering and pagination.
+        By default (no query parameters), shows all active jobs with pagination.
+
+        Query parameters:
+        - query: Natural language search query for job titles (optional)
+            Examples:
+            - "software engineer"
+            - '"Software Engineer"'
+            - "backend OR frontend"
+            - "developer -senior"
+            - "engineer not senior"
+        - title_filter: Direct title filter string (Google-like syntax) (optional)
+            If provided, takes precedence over 'query' parameter
+        - country: Filter by country code (e.g., 'us', 'uk') (optional)
+        - date_posted: Filter by date ('all', 'today', 'week', 'month') (optional, default: 'all')
+        - recent: Filter recently fetched jobs ('true' to show only jobs fetched in last 24 hours) (optional)
+        - sort: Sort order ('newest', 'oldest', 'recently_fetched') (optional, default: 'newest')
+        - offset: Offset for pagination (default: 0)
+        - limit: Number of results per page (default: 20, max: 100)
+        - page: Page number (alternative to offset, default: 1)
+        - num_pages: Number of results per page (alternative to limit, default: 20, max: 100)
+      tags:
+      - search
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/trigger-fetch:
+    get:
+      operationId: trigger_fetch_retrieve
+      description: Allow GET requests for easy cron job calling
+      tags:
+      - trigger-fetch
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: trigger_fetch_create
+      description: |-
+        Trigger endpoint to manually fetch jobs.
+        Can be called by external cron services or webhooks.
+
+        Query parameters:
+        - secret: Secret token for authentication (optional, set FETCH_SECRET env var)
+      tags:
+      - trigger-fetch
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/jobs/:
+    get:
+      operationId: v1_jobs_list
+      description: ViewSet for viewing job listings.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNestedJobList'
+          description: ''
+  /api/v1/jobs/{id}/:
+    get:
+      operationId: v1_jobs_retrieve
+      description: ViewSet for viewing job listings.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this job.
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NestedJob'
+          description: ''
+components:
+  schemas:
+    CompanyInfo:
+      type: object
+      description: Serializer for company information nested within job responses
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        domain:
+          type: string
+          nullable: true
+          maxLength: 200
+        logo:
+          type: string
+          readOnly: true
+        platform:
+          type: string
+          nullable: true
+          description: Primary ATS platform (greenhouse, lever, ashby, etc.)
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+          description: Short company description (2 sentences)
+          maxLength: 1000
+        website:
+          type: string
+          format: uri
+          nullable: true
+          description: Company website URL
+          maxLength: 200
+        founded_date:
+          type: string
+          format: date
+          nullable: true
+          description: Company founding date
+        employees_count:
+          type: string
+          nullable: true
+          description: Number of employees (e.g., '1-10', '11-50', '51-200', '201-500',
+            '501-1000', '1000+')
+          maxLength: 50
+        social_links:
+          nullable: true
+          description: 'Social media links (e.g., {''linkedin'': ''...'', ''twitter'':
+            ''...'', ''github'': ''...''})'
+        additional_details:
+          nullable: true
+          description: Additional company information (industry, headquarters, etc.)
+      required:
+      - id
+      - logo
+      - name
+    NestedJob:
+      type: object
+      description: Serializer for jobs nested within company data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 500
+        company:
+          allOf:
+          - $ref: '#/components/schemas/CompanyInfo'
+          readOnly: true
+        location:
+          type: string
+          nullable: true
+          maxLength: 200
+        location_country:
+          type: string
+          nullable: true
+          description: Country parsed from location for job-user matching
+          maxLength: 100
+        workplace_type:
+          type: string
+          nullable: true
+          description: 'Workplace type: Remote, Hybrid, or On-site'
+          maxLength: 50
+        work_mode:
+          allOf:
+          - $ref: '#/components/schemas/WorkModeEnum'
+          description: |-
+            Work mode: remote, hybrid, onsite, or unknown
+
+            * `remote` - Remote
+            * `hybrid` - Hybrid
+            * `onsite` - On-site
+            * `unknown` - Unknown
+        skills_required:
+          description: List of required skills extracted from job posting
+        skills_preferred:
+          description: Preferred/nice-to-have skills
+        tech_stack:
+          description: Technologies and tools used in the role
+        tech_stack_candidates:
+          description: Tech-like tokens not in catalog, for review/expansion
+        seniority:
+          allOf:
+          - $ref: '#/components/schemas/SeniorityEnum'
+          description: |-
+            Seniority: intern, junior, mid, senior, lead, or unknown
+
+            * `intern` - Intern
+            * `junior` - Junior
+            * `mid` - Mid
+            * `senior` - Senior
+            * `lead` - Lead
+            * `unknown` - Unknown
+        role_category:
+          type: string
+          nullable: true
+          description: 'Role category inferred from title+skills: frontend, backend,
+            data'
+          maxLength: 100
+        min_years_experience:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: Minimum years of experience required (NULL if unknown)
+        languages_required:
+          description: Languages with CEFR level when mentioned (e.g. English C1)
+        visa_sponsorship:
+          allOf:
+          - $ref: '#/components/schemas/VisaSponsorshipEnum'
+          description: |-
+            Whether visa sponsorship is offered
+
+            * `yes` - Yes
+            * `no` - No
+            * `unknown` - Unknown
+        work_authorization_required:
+          allOf:
+          - $ref: '#/components/schemas/WorkAuthorizationRequiredEnum'
+          description: |-
+            Whether work authorization is required
+
+            * `yes` - Yes
+            * `no` - No
+            * `unknown` - Unknown
+        data_completeness_score:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Completeness score 0-100 for downranking low-quality jobs
+        description:
+          type: string
+          nullable: true
+        description_short:
+          type: string
+          readOnly: true
+        responsibilities:
+          type: string
+          nullable: true
+          description: Extracted responsibilities section from job description
+        qualifications:
+          type: string
+          nullable: true
+          description: Extracted qualifications/requirements section from job description
+        benefits:
+          type: string
+          nullable: true
+          description: Benefits section from job posting, if available
+        apply_url:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 200
+        platform:
+          type: string
+          description: Source platform (greenhouse, lever, ashby, workable, etc.)
+          maxLength: 100
+        external_job_id:
+          type: string
+          description: Job ID from external platform
+          maxLength: 255
+        posted_at:
+          type: string
+          format: date-time
+          nullable: true
+        fetched_at:
+          type: string
+          format: date-time
+          readOnly: true
+        is_active:
+          type: boolean
+        raw:
+          nullable: true
+      required:
+      - company
+      - description_short
+      - external_job_id
+      - fetched_at
+      - id
+      - platform
+      - title
+    PaginatedNestedJobList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/NestedJob'
+    SeniorityEnum:
+      enum:
+      - intern
+      - junior
+      - mid
+      - senior
+      - lead
+      - unknown
+      type: string
+      description: |-
+        * `intern` - Intern
+        * `junior` - Junior
+        * `mid` - Mid
+        * `senior` - Senior
+        * `lead` - Lead
+        * `unknown` - Unknown
+    VisaSponsorshipEnum:
+      enum:
+      - 'yes'
+      - 'no'
+      - unknown
+      type: string
+      description: |-
+        * `yes` - Yes
+        * `no` - No
+        * `unknown` - Unknown
+    WorkAuthorizationRequiredEnum:
+      enum:
+      - 'yes'
+      - 'no'
+      - unknown
+      type: string
+      description: |-
+        * `yes` - Yes
+        * `no` - No
+        * `unknown` - Unknown
+    WorkModeEnum:
+      enum:
+      - remote
+      - hybrid
+      - onsite
+      - unknown
+      type: string
+      description: |-
+        * `remote` - Remote
+        * `hybrid` - Hybrid
+        * `onsite` - On-site
+        * `unknown` - Unknown
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
