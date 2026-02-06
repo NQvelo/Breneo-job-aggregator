@@ -26,7 +26,15 @@ ALLOWED_HOSTS = [
     "localhost:8081",
     ".onrender.com",
     "dashboard.breneo.app",
+    ".railway.app",  # Add generic railway support
 ]
+
+allowed_hosts_env = os.environ.get("ALLOWED_HOSTS")
+if allowed_hosts_env:
+    if allowed_hosts_env == "*":
+        ALLOWED_HOSTS = ["*"]
+    else:
+        ALLOWED_HOSTS.extend(allowed_hosts_env.split(","))
 
 # ---------------------------
 # INSTALLED APPS
