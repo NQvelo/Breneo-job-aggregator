@@ -248,7 +248,7 @@ class JobQueryParser:
     def _build_django_filters(self, keywords: List[str], exact_phrases: List[str],
                              exclusions: List[str], or_groups: List[List[str]]) -> 'Q':
         """
-        Build Django Q objects for filtering job titles.
+        Build Django Q objects for filtering job titles and skills.
         
         Returns:
             Django Q object representing the filter logic
@@ -258,11 +258,12 @@ class JobQueryParser:
         # Start with a base Q object (always True)
         q_filter = Q()
         
-        # Handle exact phrases - must match title (case-insensitive)
+        # Handle exact phrases - must match title or skills (case-insensitive)
         if exact_phrases:
             phrase_q = Q()
             for phrase in exact_phrases:
-                phrase_q |= Q(title__icontains=phrase)
+                # Match exact phrase in title OR in skills_required
+                phrase_q |= Q(title__icontains=phrase) | Q(skills_required__icontains=phrase)
             q_filter &= phrase_q
         
         # Handle OR groups and keywords together
@@ -274,7 +275,9 @@ class JobQueryParser:
             if keywords:
                 keywords_q = Q()
                 for keyword in keywords:
-                    keywords_q &= Q(title__icontains=keyword)
+                    # Keyword can be in title OR skills_required
+                    term_q = Q(title__icontains=keyword) | Q(skills_required__icontains=keyword)
+                    keywords_q &= term_q
                 combined_q = keywords_q
             
             # If we have OR groups, combine with keywords
@@ -283,7 +286,8 @@ class JobQueryParser:
                 for or_group in or_groups:
                     group_q = Q()
                     for term in or_group:
-                        group_q |= Q(title__icontains=term)
+                        # Term can be in title OR skills_required
+                        group_q |= Q(title__icontains=term) | Q(skills_required__icontains=term)
                     or_group_q |= group_q
                 
                 # Combine OR groups with keywords
@@ -299,7 +303,7 @@ class JobQueryParser:
         if exclusions:
             exclusion_q = Q()
             for exclusion in exclusions:
-                exclusion_q |= Q(title__icontains=exclusion)
+                exclusion_q |= Q(title__icontains=exclusion) | Q(skills_required__icontains=exclusion)
             q_filter &= ~exclusion_q  # Negate exclusions
         
         return q_filter

@@ -121,6 +121,78 @@
             font-size: 0.9em;
         }
 
+        .filters-section {
+            margin-top: 24px;
+        }
+
+        .filters-section h3 {
+            font-size: 1.1rem;
+            color: var(--text-color);
+            margin: 20px 0 10px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .filters-section h3:first-child {
+            margin-top: 0;
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin: 8px 0 16px 0;
+        }
+
+        .param-table th,
+        .param-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .param-table th {
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .param-table code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .example-url {
+            display: block;
+            background: #f1f5f9;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            margin: 8px 0;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .example-url a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .example-url a:hover {
+            text-decoration: underline;
+        }
+
+        .endpoint-badge {
+            font-size: 0.75rem;
+            background: #e0e7ff;
+            color: var(--primary-color);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-right: 8px;
+        }
+
         .btn {
             display: inline-block;
             background: var(--primary-color);
@@ -175,6 +247,80 @@
             <p style="font-size: 0.9rem; color: #64748b;">
                 <strong>Features:</strong> Pagination, Search (<code>?search=</code>), Filtering (<code>?location=</code>, <code>?company=</code>), Sorting (<code>?sort=</code>), Field Selection (<code>?fields=</code>).
             </p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>All Filters & API Examples</h2>
+        <p><strong>When a parameter has 2 or more values, separate them with a comma.</strong> Examples: <code>title=Engineer,Developer</code>, <code>country=us,uk</code>, <code>role_category=frontend,backend,data</code>. A job matches if it matches <em>any</em> value in that filter.</p>
+
+        <div class="filters-section">
+            <h3>Search endpoint: <code>GET /api/search</code></h3>
+            <table class="param-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>query</code></td><td>string</td><td>Natural language search (e.g. "software engineer", "backend OR frontend")</td></tr>
+                    <tr><td><code>title_filter</code></td><td>string</td><td>Direct title filter (Google-like syntax); overrides <code>query</code></td></tr>
+                    <tr><td><code>title</code></td><td>multi</td><td>Title keywords, comma-separated (e.g. <code>title=Engineer,Developer</code>)</td></tr>
+                    <tr><td><code>country</code></td><td>multi</td><td>Country codes, comma-separated (e.g. <code>country=us,uk</code>)</td></tr>
+                    <tr><td><code>location_country</code></td><td>multi</td><td>Location country names, comma-separated (e.g. <code>location_country=USA,Germany</code>)</td></tr>
+                    <tr><td><code>role_category</code></td><td>multi</td><td>Comma-separated: frontend, backend, fullstack, data, devops, etc.</td></tr>
+                    <tr><td><code>work_mode</code></td><td>multi</td><td>Comma-separated: remote, hybrid, onsite</td></tr>
+                    <tr><td><code>seniority</code></td><td>multi</td><td>Comma-separated: junior, mid, senior, lead, etc.</td></tr>
+                    <tr><td><code>company</code></td><td>multi</td><td>Company names, comma-separated (e.g. <code>company=Stripe,Airbnb</code>)</td></tr>
+                    <tr><td><code>date_posted</code></td><td>string</td><td>all, today, week, month</td></tr>
+                    <tr><td><code>recent</code></td><td>boolean</td><td>true = only jobs fetched in last 24 hours</td></tr>
+                    <tr><td><code>sort</code></td><td>string</td><td>newest, oldest, recently_fetched</td></tr>
+                    <tr><td><code>offset</code>, <code>limit</code></td><td>number</td><td>Pagination (or use <code>page</code>, <code>num_pages</code>)</td></tr>
+                </tbody>
+            </table>
+            <p><strong>Example URLs (search) — multiple values comma-separated:</strong></p>
+            <span class="example-url"><a href="/api/search?title=Engineer,Developer">/api/search?title=Engineer,Developer</a></span>
+            <span class="example-url"><a href="/api/search?country=us,uk">/api/search?country=us,uk</a></span>
+            <span class="example-url"><a href="/api/search?role_category=frontend,backend&work_mode=remote,hybrid">/api/search?role_category=frontend,backend&work_mode=remote,hybrid</a></span>
+            <span class="example-url"><a href="/api/search?country=us,uk&seniority=senior,mid&date_posted=week">/api/search?country=us,uk&seniority=senior,mid&date_posted=week</a></span>
+        </div>
+
+        <div class="filters-section">
+            <h3>Jobs list endpoint: <code>GET /api/v1/jobs/</code></h3>
+            <table class="param-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>search</code></td><td>string</td><td>Natural language search (same as <code>query</code> on /api/search)</td></tr>
+                    <tr><td><code>company</code></td><td>string</td><td>Filter by company name (single value)</td></tr>
+                    <tr><td><code>location</code></td><td>string</td><td>Filter by location substring (single value)</td></tr>
+                    <tr><td><code>work_mode</code></td><td>string</td><td>remote, hybrid, onsite (single value)</td></tr>
+                    <tr><td><code>seniority</code></td><td>string</td><td>junior, mid, senior, etc. (single value)</td></tr>
+                    <tr><td><code>date_posted</code></td><td>string</td><td>today, week, month</td></tr>
+                    <tr><td><code>sort</code></td><td>string</td><td>Comma-separated fields (e.g. <code>-posted_at</code>, <code>title</code>)</td></tr>
+                    <tr><td><code>fields</code></td><td>string</td><td>Comma-separated response fields to return</td></tr>
+                    <tr><td><code>page</code>, <code>limit</code></td><td>number</td><td>Pagination (limit max 100)</td></tr>
+                </tbody>
+            </table>
+            <p><strong>Example URLs (v1 jobs):</strong></p>
+            <span class="example-url"><a href="/api/v1/jobs/?search=engineer">/api/v1/jobs/?search=engineer</a></span>
+            <span class="example-url"><a href="/api/v1/jobs/?company=Stripe&work_mode=remote">/api/v1/jobs/?company=Stripe&work_mode=remote</a></span>
+            <span class="example-url"><a href="/api/v1/jobs/?location=Berlin&date_posted=week">/api/v1/jobs/?location=Berlin&date_posted=week</a></span>
+        </div>
+
+        <div class="filters-section">
+            <h3>Other endpoints</h3>
+            <table class="param-table">
+                <thead>
+                    <tr><th>Endpoint</th><th>Description</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>GET /api/</code></td><td>Jobs grouped by company (legacy)</td></tr>
+                    <tr><td><code>GET /api/companies</code></td><td>Company list (optional <code>?name=</code>)</td></tr>
+                    <tr><td><code>GET /api/companies/{company_name}</code></td><td>Company detail and jobs</td></tr>
+                    <tr><td><code>GET /api/job-details?url=...</code></td><td>Fetch and return job details by URL</td></tr>
+                    <tr><td><code>POST /api/trigger-fetch</code></td><td>Trigger job fetch (cron)</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 

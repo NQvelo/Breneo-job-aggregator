@@ -35,29 +35,51 @@ class JobsGroupedByCompany(APIView):
         return Response(serializer.data)
 
 
+def _get_multi_value_param(request, key, split_comma=True):
+    """Get a list of non-empty values from query params. Supports ?key=a,b,c or ?key=a&key=b."""
+    values = request.query_params.getlist(key)
+    if not values and key in request.query_params:
+        single = request.query_params.get(key, '').strip()
+        if single and split_comma:
+            values = [v.strip() for v in single.split(',') if v.strip()]
+        elif single:
+            values = [single]
+    else:
+        # Flatten: split each value by comma so "us,uk" from getlist becomes ["us", "uk"]
+        result = []
+        for v in values:
+            if not v or not v.strip():
+                continue
+            v = v.strip()
+            if split_comma:
+                for part in v.split(','):
+                    if part.strip():
+                        result.append(part.strip())
+            else:
+                result.append(v)
+        values = result
+    return values
+
+
 class JobSearchView(APIView):
     """
     Search endpoint for jobs with NLP-based filtering and pagination.
     By default (no query parameters), shows all active jobs with pagination.
     
-    Query parameters:
+    Query parameters (multi-value: when 2+ items, separate with comma, e.g. title=Engineer,Developer and country=us,uk):
     - query: Natural language search query for job titles (optional)
-        Examples:
-        - "software engineer"
-        - '"Software Engineer"'
-        - "backend OR frontend"
-        - "developer -senior"
-        - "engineer not senior"
     - title_filter: Direct title filter string (Google-like syntax) (optional)
-        If provided, takes precedence over 'query' parameter
-    - country: Filter by country code (e.g., 'us', 'uk') (optional)
-    - date_posted: Filter by date ('all', 'today', 'week', 'month') (optional, default: 'all')
-    - recent: Filter recently fetched jobs ('true' to show only jobs fetched in last 24 hours) (optional)
-    - sort: Sort order ('newest', 'oldest', 'recently_fetched') (optional, default: 'newest')
-    - offset: Offset for pagination (default: 0)
-    - limit: Number of results per page (default: 20, max: 100)
-    - page: Page number (alternative to offset, default: 1)
-    - num_pages: Number of results per page (alternative to limit, default: 20, max: 100)
+    - title: One or more title keywords, comma-separated; job matches if title contains ANY (e.g. title=Engineer,Developer)
+    - country: One or more country codes, comma-separated (e.g. country=us,uk)
+    - location_country: One or more location country names, comma-separated (e.g. location_country=USA,Germany)
+    - role_category: One or more, comma-separated (e.g. role_category=frontend,backend,data)
+    - work_mode: One or more, comma-separated (e.g. work_mode=remote,hybrid,onsite)
+    - seniority: One or more, comma-separated (e.g. seniority=senior,junior,mid)
+    - company: One or more company names, comma-separated (e.g. company=Stripe,Airbnb)
+    - date_posted: 'all', 'today', 'week', 'month' (optional, default: 'all')
+    - recent: 'true' to show only jobs fetched in last 24 hours (optional)
+    - sort: 'newest', 'oldest', 'recently_fetched' (optional, default: 'newest')
+    - offset, limit OR page, num_pages: pagination
     """
 
     def get(self, request):
@@ -67,10 +89,18 @@ class JobSearchView(APIView):
         # Get query parameters
         user_query = request.query_params.get('query', '').strip()
         title_filter = request.query_params.get('title_filter', '').strip()
-        country = request.query_params.get('country', '').strip().lower()
         date_posted = request.query_params.get('date_posted', 'all').strip().lower()
         recent = request.query_params.get('recent', '').strip().lower() == 'true'
         sort_order = request.query_params.get('sort', 'newest').strip().lower()
+
+        # Multi-value filters (list of values; job matches if it matches ANY)
+        countries = _get_multi_value_param(request, 'country')
+        location_countries = _get_multi_value_param(request, 'location_country')
+        title_keywords = _get_multi_value_param(request, 'title')
+        role_categories = _get_multi_value_param(request, 'role_category')
+        work_modes = _get_multi_value_param(request, 'work_mode')
+        seniorities = _get_multi_value_param(request, 'seniority')
+        company_names = _get_multi_value_param(request, 'company')
         
         # Handle pagination - support both offset/limit and page/num_pages
         try:
@@ -130,29 +160,74 @@ class JobSearchView(APIView):
             title_q_filter = search_params['django_q_filters']
             parsed_title_filter = search_params['title_filter']
         
-        # Apply title filter
+        # Apply title filter (from query / title_filter)
         if title_q_filter:
             jobs = jobs.filter(title_q_filter)
         
-        # Filter by country
-        if country:
-            # Filter by location field (location_country field was removed)
-            # Handle common country variations
-            country_variations = {
-                'us': ['usa', 'united states', 'united states of america', 'us'],
-                'uk': ['united kingdom', 'england', 'britain', 'uk'],
-                'ca': ['canada', 'ca'],
-            }
-            
-            # Start with the country code itself
-            country_filters = Q(location__icontains=country)
-            
-            # Add variations if country code matches
-            if country in country_variations:
-                for variation in country_variations[country]:
-                    country_filters |= Q(location__icontains=variation)
-            
-            jobs = jobs.filter(country_filters)
+        # Multi-value title keywords: job matches if title contains ANY
+        if title_keywords:
+            title_kw_q = Q()
+            for kw in title_keywords:
+                title_kw_q |= Q(title__icontains=kw)
+            jobs = jobs.filter(title_kw_q)
+        
+        # Multi-value country filter (code or variations, e.g. us, uk)
+        country_variations = {
+            'us': ['usa', 'united states', 'united states of america', 'us'],
+            'uk': ['united kingdom', 'england', 'britain', 'uk'],
+            'ca': ['canada', 'ca'],
+            'de': ['germany', 'deutschland'],
+            'fr': ['france'],
+            'au': ['australia'],
+            'in': ['india'],
+            'nl': ['netherlands', 'holland'],
+        }
+        if countries:
+            country_q = Q()
+            for code in countries:
+                code = code.lower()
+                country_q |= Q(location__icontains=code)
+                country_q |= Q(location_country__icontains=code)
+                if code in country_variations:
+                    for v in country_variations[code]:
+                        country_q |= Q(location__icontains=v)
+                        country_q |= Q(location_country__icontains=v)
+            jobs = jobs.filter(country_q)
+        
+        # Multi-value location_country (exact names, e.g. USA, Germany)
+        if location_countries:
+            loc_q = Q()
+            for loc in location_countries:
+                loc_q |= Q(location_country__icontains=loc)
+            jobs = jobs.filter(loc_q)
+        
+        # Multi-value role_category
+        if role_categories:
+            role_q = Q()
+            for r in role_categories:
+                role_q |= Q(role_category__iexact=r)
+            jobs = jobs.filter(role_q)
+        
+        # Multi-value work_mode
+        if work_modes:
+            mode_q = Q()
+            for m in work_modes:
+                mode_q |= Q(work_mode__iexact=m)
+            jobs = jobs.filter(mode_q)
+        
+        # Multi-value seniority
+        if seniorities:
+            sen_q = Q()
+            for s in seniorities:
+                sen_q |= Q(seniority__iexact=s)
+            jobs = jobs.filter(sen_q)
+        
+        # Multi-value company name
+        if company_names:
+            company_q = Q()
+            for name in company_names:
+                company_q |= Q(company__name__icontains=name)
+            jobs = jobs.filter(company_q)
         
         # Filter by date posted (only if not 'all')
         if date_posted and date_posted != 'all':
@@ -242,7 +317,13 @@ class JobSearchView(APIView):
             'filters': {
                 'query': user_query if user_query else None,
                 'title_filter': parsed_title_filter if parsed_title_filter else None,
-                'country': country if country else None,
+                'title': title_keywords if title_keywords else None,
+                'country': countries if countries else None,
+                'location_country': location_countries if location_countries else None,
+                'role_category': role_categories if role_categories else None,
+                'work_mode': work_modes if work_modes else None,
+                'seniority': seniorities if seniorities else None,
+                'company': company_names if company_names else None,
                 'date_posted': date_posted if date_posted != 'all' else None,
                 'recent': recent,
                 'sort': sort_order,
