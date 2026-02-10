@@ -6,6 +6,7 @@ from jobs.utils import parse_date, process_job_description
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.job_normalizer import normalize_job_fields
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
+from jobs.industry_taxonomy import IndustryContext, determine_industry
 from jobs import fetchers
 import logging
 import sys
@@ -233,11 +234,48 @@ class Command(BaseCommand):
                             job_obj.location_country = norm.get("location_country")
                             job_obj.visa_sponsorship = extract_visa_sponsorship(job_obj.description) or "unknown"
                             job_obj.work_authorization_required = extract_work_authorization_required(job_obj.description) or "unknown"
+                            
+                            # Determine industry_tags (only if new job, company changed, title/description changed, or currently empty)
+                            should_compute_industry = (
+                                created or
+                                not job_obj.industry_tags or
+                                job_obj.title != j.get("title") or
+                                job_obj.description != j.get("description")
+                            )
+                            if should_compute_industry:
+                                try:
+                                    # Try to get source-provided industry from raw or company.additional_details
+                                    source_industry = None
+                                    if isinstance(job_obj.raw, dict):
+                                        source_industry = (
+                                            job_obj.raw.get("industry")
+                                            or job_obj.raw.get("category")
+                                            or job_obj.raw.get("sector")
+                                        )
+                                    if not source_industry and job_obj.company and hasattr(job_obj.company, "additional_details"):
+                                        if isinstance(job_obj.company.additional_details, dict):
+                                            source_industry = (
+                                                job_obj.company.additional_details.get("industry")
+                                                or job_obj.company.additional_details.get("sector")
+                                            )
+                                    
+                                    ctx = IndustryContext(
+                                        title=job_obj.title or "",
+                                        description_raw=job_obj.description or "",
+                                        company_name=job_obj.company.name if job_obj.company else "",
+                                        source_industry_field=source_industry,
+                                    )
+                                    tags = determine_industry(ctx)
+                                    job_obj.industry_tags = ", ".join(tags) if tags else ""
+                                except Exception as e:
+                                    logger.warning(f"Industry determination failed for {job_obj.title}: {e}")
+                            
                             job_obj.save(update_fields=[
                                 "work_mode", "seniority", "role_category", "min_years_experience",
                                 "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates",
                                 "languages_required", "embedding_text", "data_completeness_score",
                                 "location_country", "visa_sponsorship", "work_authorization_required",
+                                "industry_tags",
                             ])
                         except Exception as e:
                             logger.warning(f"Matching fields normalizer failed for {job_obj.title}: {e}")

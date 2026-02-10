@@ -82,6 +82,7 @@ For every job that has `title` and (`description` or `qualifications`), the comm
 | location_country | `location_country` |
 | visa_sponsorship | `visa_sponsorship` |
 | work_authorization_required | `work_authorization_required` |
+| industry_tags | `industry_tags` |
 
 ### 5.1 Industry matching (industryTags)
 
@@ -238,24 +239,26 @@ If the array is empty, store null / empty string (consistent with the current sc
 
 #### 5.1.5 Integration into fetch/upsert flow
 
-In the job ingestion / upsert pipeline, **after** mapping raw job fields:
+In `fetch_jobs` command, **industry_tags** is computed and saved **alongside other matching fields** (section 5 above).
 
-1. Call:
+**Location in code:** `jobs/management/commands/fetch_jobs.py`, right after `normalize_job_fields()` and visa/work_authorization extraction.
 
-   - `industryTags = determineIndustry({ title, descriptionRaw, companyName, sourceIndustryField })`
+**Process:**
 
-2. Set:
+1. Check if industry should be recomputed:
+   - job is new (`created=True`), or
+   - `industry_tags` is currently empty, or
+   - `title` or `description` changed
 
-   - `job.industryTags = industryTags`
+2. If recompute needed:
+   - Extract `source_industry_field` from `job.raw` (keys: `industry`, `category`, `sector`) or `company.additional_details`
+   - Build `IndustryContext(title, description_raw, company_name, source_industry_field)`
+   - Call `determine_industry(ctx)` → returns list of canonical tags
+   - Set `job.industry_tags = ", ".join(tags)` (empty string if no tags)
 
-3. Continue normal upsert.
+3. Save with other matching fields in the same `update_fields` list.
 
-Only regenerate `industryTags` if:
-
-- job is new, or
-- `companyName` changed, or
-- `title` or `description` changed, or
-- `industryTags` is currently empty.
+**Result:** Every job fetched via `fetch_jobs` automatically gets `industry_tags` populated using the priority logic (source → company map → keyword inference).
 
 #### 5.1.6 Test cases (examples)
 
@@ -272,6 +275,6 @@ So every fetched job (new or updated) gets these matching fields filled from the
 
 - **From API**: title, company, location, description, apply_url, posted_at, platform, external_job_id, raw → all passed into `update_or_create` and/or used for Company.
 - **From parser**: responsibilities, qualifications, workplace_type, skills_required (legacy), structured_description (summary, company_overview, role_description), benefits → set in Job.save() and again explicitly in fetch_jobs.
-- **From normalizer**: work_mode, seniority, role_category, min_years_experience, skills_required (catalog), skills_preferred, tech_stack, tech_stack_candidates, languages_required, embedding_text, data_completeness_score, location_country, visa_sponsorship, work_authorization_required → set in fetch_jobs for every job that has title and description/qualifications.
+- **From normalizer**: work_mode, seniority, role_category, min_years_experience, skills_required (catalog), skills_preferred, tech_stack, tech_stack_candidates, languages_required, embedding_text, data_completeness_score, location_country, visa_sponsorship, work_authorization_required, industry_tags → set in fetch_jobs for every job that has title and description/qualifications.
 
 So when you fetch new jobs, every available detail from the fetcher is inserted, and every derived field (parser + normalizer) is refreshed for that run.
