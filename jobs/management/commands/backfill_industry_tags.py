@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from jobs.models import Job
-from jobs.industry_taxonomy import IndustryContext, determine_industry
+from jobs.industry_taxonomy import determine_industry_tags
 
 
 class Command(BaseCommand):
@@ -21,38 +21,35 @@ class Command(BaseCommand):
 
         updated = 0
         for job in qs:
-            # Try to get any source-provided industry from raw/company.additional_details
             source_industry = None
             if isinstance(job.raw, dict):
-                # Common keys: industry, category, sector (best effort)
                 source_industry = (
                     job.raw.get("industry")
                     or job.raw.get("category")
                     or job.raw.get("sector")
                 )
-
             company = job.company
-            if hasattr(company, "additional_details") and isinstance(
-                company.additional_details, dict
-            ):
+            if company and getattr(company, "additional_details", None) and isinstance(company.additional_details, dict):
                 source_industry = (
                     source_industry
                     or company.additional_details.get("industry")
                     or company.additional_details.get("sector")
                 )
 
-            ctx = IndustryContext(
-                title=job.title or "",
-                description_raw=job.description or "",
+            tags_str, _ = determine_industry_tags(
                 company_name=company.name if company else "",
-                source_industry_field=source_industry,
+                job_title=job.title or "",
+                source_industry=source_industry,
             )
-
-            tags = determine_industry(ctx)
-            # Join here; Job.save() will normalize formatting again
-            job.industry_tags = ", ".join(tags) if tags else ""
-            job.save(update_fields=["industry_tags"])
-            updated += 1
+            # If derived non-empty: overwrite. If derived empty and existing set: keep existing.
+            if tags_str:
+                job.industry_tags = tags_str
+                job.save(update_fields=["industry_tags"])
+                updated += 1
+            elif not (job.industry_tags or "").strip():
+                job.industry_tags = ""
+                job.save(update_fields=["industry_tags"])
+                updated += 1
 
         self.stdout.write(
             self.style.SUCCESS(f"Updated industry_tags for {updated} job(s).")

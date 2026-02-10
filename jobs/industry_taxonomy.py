@@ -1,22 +1,46 @@
 """
 Industry taxonomy and determination logic for Job.industry_tags.
 
-This module implements:
-- INDUSTRY_SYNONYMS
-- COMPANY_INDUSTRY_MAP
-- KEYWORD_INDUSTRY_MAP
-- determine_industry() helper
+Breneo job-aggregation backend: deterministic industry from company (primary) and title (disambiguation/fallback).
+Implements: normalizeText, canonicalizeIndustryTag, Layer A (source) / B (company map) / C (title fallback).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
 import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# Normalization
+# ---------------------------------------------------------------------------
+
+COMPANY_SUFFIXES = frozenset({"inc", "gmbh", "llc", "ltd", "ag", "plc", "co", "kg"})
+
+
+def normalize_text(s: Optional[str]) -> str:
+    """Lowercase, trim, collapse spaces, remove punctuation (keep letters/numbers/spaces), strip company suffixes."""
+    if not s:
+        return ""
+    t = str(s).strip().lower()
+    t = re.sub(r"[^\w\s]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    words = t.split()
+    if words and words[-1] in COMPANY_SUFFIXES:
+        words = words[:-1]
+    return " ".join(words) if words else ""
+
+
+def canonicalize_industry_tag(tag: Optional[str]) -> str:
+    """normalizeText(tag) then apply INDUSTRY_SYNONYMS. Returns canonical tag or cleaned tag."""
+    normalized = normalize_text(tag)
+    if not normalized:
+        return ""
+    return INDUSTRY_SYNONYMS.get(normalized, normalized)
 
 
 # ---------------------------------------------------------------------------
-# 1) Synonym normalization
+# INDUSTRY_SYNONYMS
 # ---------------------------------------------------------------------------
 
 INDUSTRY_SYNONYMS: Dict[str, str] = {
@@ -24,17 +48,32 @@ INDUSTRY_SYNONYMS: Dict[str, str] = {
     "banking": "banking",
     "payments": "payments",
     "ecommerce": "e-commerce",
+    "e-commerce": "e-commerce",
     "retail tech": "retail",
     "health tech": "healthcare",
     "medtech": "healthcare",
     "edtech": "education",
     "saas": "saas",
     "enterprise software": "enterprise software",
+    "insurance": "insurance",
+    "real estate": "real estate",
+    "proptech": "real estate",
+    "telecom": "telecom",
+    "energy": "energy",
+    "travel": "travel",
+    "logistics": "logistics",
+    "gaming": "gaming",
+    "education": "education",
+    "healthcare": "healthcare",
+    "fintech": "fintech",
+    "cloud": "cloud",
+    "marketplace": "marketplace",
+    "food delivery": "food delivery",
+    "mobility": "mobility",
 }
 
-
 # ---------------------------------------------------------------------------
-# 2) Company → industries
+# COMPANY_INDUSTRY_MAP (normalized company key -> list of canonical tags)
 # ---------------------------------------------------------------------------
 
 COMPANY_INDUSTRY_MAP: Dict[str, List[str]] = {
@@ -44,7 +83,11 @@ COMPANY_INDUSTRY_MAP: Dict[str, List[str]] = {
     "sap": ["enterprise software", "saas"],
     "siemens": ["industrial", "engineering"],
     "zalando": ["e-commerce", "retail"],
-    # From fetch_jobs COMPANIES list
+    "uber": ["mobility", "marketplace"],
+    "delivery hero": ["food delivery", "marketplace"],
+    "google": ["internet", "software", "cloud"],
+    "alphabet": ["internet", "software", "cloud"],
+    "meta": ["internet", "social", "software"],
     "intercom": ["saas", "customer engagement"],
     "figma": ["saas", "design"],
     "spotify": ["media", "streaming"],
@@ -56,20 +99,203 @@ COMPANY_INDUSTRY_MAP: Dict[str, List[str]] = {
     "reddit": ["media", "social"],
 }
 
-
 # ---------------------------------------------------------------------------
-# 3) Keyword → industries
+# COMPANY_ALIASES (alias -> canonical key for map lookup)
 # ---------------------------------------------------------------------------
 
-KEYWORD_INDUSTRY_MAP: Dict[str, List[str]] = {
-    "fintech": ["payment", "bank", "card", "lending", "kyc", "aml", "trading"],
-    "e-commerce": ["checkout", "cart", "order", "storefront", "marketplace", "shop"],
-    "healthcare": ["patient", "clinical", "hospital", "ehr", "medical"],
-    "gaming": ["game", "unity", "unreal", "multiplayer", "gaming"],
-    "education": ["student", "learning", "edtech", "course", "academy"],
-    "logistics": ["delivery", "warehouse", "fleet", "logistics", "shipment"],
+COMPANY_ALIASES: Dict[str, str] = {
+    "alphabet": "google",
+    "meta platforms": "meta",
 }
 
+# ---------------------------------------------------------------------------
+# COMPANY_CONTEXT_RULES: multi-industry disambiguation by title keywords
+# (company key -> list of (keyword_list, industry_subset))
+# ---------------------------------------------------------------------------
+
+COMPANY_CONTEXT_RULES: Dict[str, List[Tuple[List[str], List[str]]]] = {
+    "amazon": [
+        (["aws", "cloud", "devops", "ec2", "lambda"], ["cloud"]),
+        (["e-commerce", "retail", "marketplace", "fulfillment"], ["e-commerce", "retail"]),
+    ],
+    "google": [
+        (["cloud", "gcp", "google cloud"], ["cloud"]),
+        (["ads", "advertising"], ["internet", "software"]),
+    ],
+}
+
+# Default: if no title rule matches, keep all company tags (no disambiguation).
+
+# ---------------------------------------------------------------------------
+# TITLE_INDUSTRY_KEYWORDS (Layer C fallback: industry -> strong keywords)
+# ---------------------------------------------------------------------------
+
+TITLE_INDUSTRY_KEYWORDS: Dict[str, List[str]] = {
+    "fintech": ["fintech", "payments", "banking", "lending", "kyc", "aml", "trading", "risk"],
+    "e-commerce": ["e-commerce", "ecommerce", "checkout", "marketplace", "retail", "shopify", "storefront"],
+    "healthcare": ["healthcare", "clinical", "hospital", "patient", "ehr", "medical"],
+    "gaming": ["gaming", "game", "unity", "unreal"],
+    "education": ["education", "edtech", "learning", "school", "student"],
+    "logistics": ["logistics", "warehouse", "shipment", "fleet", "supply chain"],
+    "insurance": ["insurance", "underwriting", "claims", "actuarial"],
+    "telecom": ["telecom", "5g", "network operator"],
+    "energy": ["energy", "oil", "gas", "renewables", "solar", "wind"],
+    "real estate": ["real estate", "property", "proptech"],
+    "travel": ["travel", "hotel", "airline", "booking"],
+}
+
+# Minimum key length for substring match (avoid "it", "ab")
+COMPANY_SUBSTRING_MIN_KEY_LEN = 5
+
+# Industry source labels for auditing
+INDUSTRY_SOURCE_SOURCE = "source"
+INDUSTRY_SOURCE_COMPANY_MAP = "company_map"
+INDUSTRY_SOURCE_TITLE_FALLBACK = "title_fallback"
+INDUSTRY_SOURCE_UNKNOWN = "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Layer A — Source-provided industry
+# ---------------------------------------------------------------------------
+
+def _layer_a_source(source_industry: Optional[str]) -> List[str]:
+    if not source_industry:
+        return []
+    raw = str(source_industry).strip()
+    if not raw:
+        return []
+    parts = re.split(r"[,/|]", raw)
+    tags: List[str] = []
+    for part in parts:
+        canonical = canonicalize_industry_tag(part)
+        if canonical and canonical not in tags:
+            tags.append(canonical)
+    return tags
+
+
+# ---------------------------------------------------------------------------
+# Layer B — Company-based industry (exact, alias, substring)
+# ---------------------------------------------------------------------------
+
+def _company_lookup_key(normalized_company: str) -> Optional[str]:
+    """Return company key for COMPANY_INDUSTRY_MAP, or None."""
+    if not normalized_company:
+        return None
+    # Exact
+    if normalized_company in COMPANY_INDUSTRY_MAP:
+        return normalized_company
+    # Alias
+    if normalized_company in COMPANY_ALIASES:
+        return COMPANY_ALIASES[normalized_company]
+    # Substring: keys length >= 5, sorted by length desc
+    candidates = sorted(
+        (k for k in COMPANY_INDUSTRY_MAP if len(k) >= COMPANY_SUBSTRING_MIN_KEY_LEN),
+        key=len,
+        reverse=True,
+    )
+    for key in candidates:
+        if f" {key} " in f" {normalized_company} " or normalized_company.startswith(key + " ") or normalized_company.endswith(" " + key):
+            return key
+    return None
+
+
+def _layer_b_company(company_name: str, job_title: str) -> Tuple[List[str], Optional[str]]:
+    """Returns (tags, company_key). company_key used for disambiguation."""
+    normalized = normalize_text(company_name)
+    key = _company_lookup_key(normalized)
+    if not key:
+        return [], None
+    tags = list(COMPANY_INDUSTRY_MAP.get(key, []))
+    if not tags:
+        return [], None
+    # Disambiguation: multi-industry + title signals
+    rules = COMPANY_CONTEXT_RULES.get(key, [])
+    normalized_title = normalize_text(job_title)
+    for keywords, subset in rules:
+        if any(kw in normalized_title for kw in keywords):
+            return subset, key
+    return tags, key
+
+
+# ---------------------------------------------------------------------------
+# Layer C — Title-only inference (high confidence only)
+# ---------------------------------------------------------------------------
+
+def _layer_c_title(job_title: str) -> List[str]:
+    """Infer industry from title only: >= 2 keyword hits OR title contains industry name explicitly. Tie => empty."""
+    normalized_title = normalize_text(job_title)
+    if not normalized_title:
+        return []
+    scores: Dict[str, int] = {}
+    for industry, keywords in TITLE_INDUSTRY_KEYWORDS.items():
+        count = sum(1 for kw in keywords if kw in normalized_title)
+        if count > 0:
+            scores[industry] = count
+    # Explicit industry name in title (treat as >= 2)
+    for industry in list(scores.keys()):
+        if industry in normalized_title:
+            scores[industry] = max(scores.get(industry, 0), 2)
+    # Accept only if >= 2 hits or explicit
+    accepted = [ind for ind, score in scores.items() if score >= 2]
+    if len(accepted) > 1:
+        # Tie: return none unless exactly one is explicit in title
+        explicit = [ind for ind in accepted if ind in normalized_title]
+        if len(explicit) == 1:
+            return explicit
+        return []
+    return accepted
+
+
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
+
+def _format_industry_tags(tags: List[str]) -> str:
+    """Canonicalize, dedupe, sort, join with ', '."""
+    out: List[str] = []
+    seen = set()
+    for t in tags:
+        c = canonicalize_industry_tag(t) if t else ""
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return ", ".join(sorted(out)) if out else ""
+
+
+# ---------------------------------------------------------------------------
+# Main API
+# ---------------------------------------------------------------------------
+
+def determine_industry_tags(
+    company_name: str,
+    job_title: str,
+    source_industry: Optional[str] = None,
+) -> Tuple[str, str]:
+    """
+    Deterministic industry from (company + title). Returns (industryTagsString, industrySource).
+    industrySource is one of: "source" | "company_map" | "title_fallback" | "unknown".
+    """
+    # Layer A
+    layer_a = _layer_a_source(source_industry)
+    if layer_a:
+        return _format_industry_tags(layer_a), INDUSTRY_SOURCE_SOURCE
+
+    # Layer B
+    layer_b, company_key = _layer_b_company(company_name, job_title)
+    if layer_b:
+        return _format_industry_tags(layer_b), INDUSTRY_SOURCE_COMPANY_MAP
+
+    # Layer C
+    layer_c = _layer_c_title(job_title)
+    if layer_c:
+        return _format_industry_tags(layer_c), INDUSTRY_SOURCE_TITLE_FALLBACK
+
+    return "", INDUSTRY_SOURCE_UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility: IndustryContext + determine_industry (for fetch_jobs / backfill)
+# ---------------------------------------------------------------------------
 
 @dataclass
 class IndustryContext:
@@ -79,120 +305,13 @@ class IndustryContext:
     source_industry_field: Optional[str] = None
 
 
-def _clean_text(value: Optional[str]) -> str:
-    return (value or "").strip().lower()
-
-
-def _normalize_company_name(name: str) -> str:
-    name = _clean_text(name)
-    # Remove punctuation so "PayPal, Inc." → "paypal inc"
-    return re.sub(r"[^\w\s]", "", name)
-
-
-def _normalize_industry_token(raw: str) -> str:
-    token = _clean_text(raw)
-    if not token:
-        return ""
-    # Try full string first
-    if token in INDUSTRY_SYNONYMS:
-        return INDUSTRY_SYNONYMS[token]
-    # No synonym; keep cleaned token as-is
-    return token
-
-
-def _from_source_industry(ctx: IndustryContext) -> List[str]:
-    if not ctx.source_industry_field:
-        return []
-
-    raw = str(ctx.source_industry_field).strip() if ctx.source_industry_field else ""
-    if not raw:
-        return []
-    # Many APIs provide comma-separated industries/categories
-    parts: Iterable[str] = re.split(r"[,/]", raw)
-    normalized: List[str] = []
-    for part in parts:
-        token = _normalize_industry_token(part)
-        if token:
-            normalized.append(token)
-    # Deduplicate while preserving order
-    seen = set()
-    result: List[str] = []
-    for t in normalized:
-        if t not in seen:
-            seen.add(t)
-            result.append(t)
-    return result
-
-
-def _from_company(ctx: IndustryContext) -> List[str]:
-    company_key = _normalize_company_name(ctx.company_name)
-    if not company_key:
-        return []
-    # Exact match first (e.g. "stripe")
-    tags = COMPANY_INDUSTRY_MAP.get(company_key, [])
-    if tags:
-        return tags
-    # Fallback: match by first word so "stripe inc" / "stripe" both match
-    first_word = company_key.split()[0] if company_key.split() else ""
-    return COMPANY_INDUSTRY_MAP.get(first_word, [])
-
-
-def _from_keywords(ctx: IndustryContext) -> List[str]:
-    title = _clean_text(ctx.title)
-    blob = f"{ctx.title}\n{ctx.description_raw}"
-    blob = _clean_text(blob)
-    if not blob and not title:
-        return []
-
-    matched: List[str] = []
-    for industry, keywords in KEYWORD_INDUSTRY_MAP.items():
-        count = 0
-        for kw in keywords:
-            if kw in blob:
-                count += 1
-        # High-confidence rule
-        if count >= 2 or (industry in title):
-            matched.append(industry)
-
-    # Deduplicate
-    seen = set()
-    result: List[str] = []
-    for t in matched:
-        if t not in seen:
-            seen.add(t)
-            result.append(t)
-    return result
-
-
 def determine_industry(ctx: IndustryContext) -> List[str]:
-    """
-    Determine canonical industry tags for a job.
-
-    Priority:
-    1) source-provided industry/category/sector (via INDUSTRY_SYNONYMS)
-    2) COMPANY_INDUSTRY_MAP
-    3) KEYWORD_INDUSTRY_MAP (high-confidence only)
-    """
-    # Step 1: source-provided
-    tags = _from_source_industry(ctx)
-    if tags:
-        return _format_tags(tags)
-
-    # Step 2: company map
-    tags = _from_company(ctx)
-    if tags:
-        return _format_tags(tags)
-
-    # Step 3: keyword inference
-    tags = _from_keywords(ctx)
-    if tags:
-        return _format_tags(tags)
-
-    return []
-
-
-def _format_tags(tags: Iterable[str]) -> List[str]:
-    cleaned = [_clean_text(t) for t in tags if _clean_text(t)]
-    unique_sorted = sorted(set(cleaned))
-    return unique_sorted
-
+    """Returns list of canonical tags. Uses determine_industry_tags under the hood."""
+    tags_str, _ = determine_industry_tags(
+        company_name=ctx.company_name or "",
+        job_title=ctx.title or "",
+        source_industry=ctx.source_industry_field,
+    )
+    if not tags_str:
+        return []
+    return [t.strip() for t in tags_str.split(",") if t.strip()]

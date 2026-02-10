@@ -6,7 +6,7 @@ from jobs.utils import parse_date, process_job_description
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.job_normalizer import normalize_job_fields
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
-from jobs.industry_taxonomy import IndustryContext, determine_industry
+from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
 import logging
 import sys
@@ -46,7 +46,7 @@ COMPANIES = [
 ]
 
 def _compute_industry_tags(job_obj, raw_job_dict, created, logger_instance):
-    """Set job_obj.industry_tags from title/description/company. Does not save."""
+    """Set job_obj.industry_tags from company + title (+ source). Does not save. If derived empty and existing set, keep existing."""
     should_compute = (
         created
         or not (job_obj.industry_tags or "")
@@ -69,14 +69,16 @@ def _compute_industry_tags(job_obj, raw_job_dict, created, logger_instance):
                     job_obj.company.additional_details.get("industry")
                     or job_obj.company.additional_details.get("sector")
                 )
-        ctx = IndustryContext(
-            title=job_obj.title or "",
-            description_raw=job_obj.description or "",
+        tags_str, _source = determine_industry_tags(
             company_name=job_obj.company.name if job_obj.company else "",
-            source_industry_field=source_industry,
+            job_title=job_obj.title or "",
+            source_industry=source_industry,
         )
-        tags = determine_industry(ctx)
-        job_obj.industry_tags = ", ".join(tags) if tags else ""
+        # If derived non-empty: overwrite. If derived empty and existing set: keep existing.
+        if tags_str:
+            job_obj.industry_tags = tags_str
+        elif not (job_obj.industry_tags or "").strip():
+            job_obj.industry_tags = ""
     except Exception as e:
         logger_instance.warning("Industry determination failed for %s: %s", job_obj.title, e)
 
