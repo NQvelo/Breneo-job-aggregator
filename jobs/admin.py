@@ -42,7 +42,19 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ("title", "get_company_name", "description_short_display", "location", "work_mode", "seniority", "platform", "posted_at", "data_completeness_score", "is_active")
+    list_display = (
+        "title",
+        "get_company_name",
+        "description_short_display",
+        "location",
+        "work_mode",
+        "seniority",
+        "platform",
+        "posted_at",
+        "data_completeness_score",
+        "is_active",
+        "industry_tags",
+    )
     list_filter = ("platform", "company", "work_mode", "seniority", "is_active")
     search_fields = ("title", "company__name", "location", "workplace_type", "description", "responsibilities", "qualifications", "benefits", "role_category")
     ordering = ("-posted_at", "-fetched_at")
@@ -54,7 +66,19 @@ class JobAdmin(admin.ModelAdmin):
             "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "benefits", "apply_url")
         }),
         ("Matching Fields", {
-            "fields": ("seniority", "role_category", "min_years_experience", "languages_required", "visa_sponsorship", "work_authorization_required", "embedding_text", "data_completeness_score", "is_low_quality", "is_duplicate"),
+            "fields": (
+                "seniority",
+                "role_category",
+                "min_years_experience",
+                "languages_required",
+                "visa_sponsorship",
+                "work_authorization_required",
+                "industry_tags",
+                "embedding_text",
+                "data_completeness_score",
+                "is_low_quality",
+                "is_duplicate",
+            ),
             "classes": ("collapse",)
         }),
         ("Metadata", {
