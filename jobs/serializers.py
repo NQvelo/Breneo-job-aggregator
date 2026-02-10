@@ -33,7 +33,7 @@ class JobSerializer(DynamicFieldsModelSerializer):
         fields = [
             'id', 'title', 'company', 'company_logo', 'location', 'location_country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
-            'seniority', 'role_category', 'min_years_experience', 'languages_required',
+            'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
             'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications', 'benefits',
             'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
@@ -109,7 +109,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
         fields = [
             'id', 'title', 'company', 'location', 'location_country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
-            'seniority', 'role_category', 'min_years_experience', 'languages_required',
+            'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
             'description', 'description_short', 'responsibilities', 'qualifications', 'benefits',
             'apply_url', 'platform', 'external_job_id',
@@ -223,6 +223,7 @@ def job_to_dict(job):
             "languages_required": getattr(job, "languages_required", []) or [],
             "visa_sponsorship": getattr(job, "visa_sponsorship", "unknown"),
             "work_authorization_required": getattr(job, "work_authorization_required", "unknown"),
+            "industry_tags": getattr(job, "industry_tags", "") or "",
             "data_completeness_score": getattr(job, "data_completeness_score", 0),
             "description": job.description,
             "description_short": job.get_description_short(max_lines=4, max_chars=400),
