@@ -45,6 +45,42 @@ COMPANIES = [
     # {"name": "LinkedIn Jobs", "platform": "linkedin", "url": "<your API URL>"}
 ]
 
+def _compute_industry_tags(job_obj, raw_job_dict, created, logger_instance):
+    """Set job_obj.industry_tags from title/description/company. Does not save."""
+    should_compute = (
+        created
+        or not (job_obj.industry_tags or "")
+        or job_obj.title != raw_job_dict.get("title")
+        or job_obj.description != raw_job_dict.get("description")
+    )
+    if not should_compute:
+        return
+    try:
+        source_industry = None
+        if isinstance(job_obj.raw, dict):
+            source_industry = (
+                job_obj.raw.get("industry")
+                or job_obj.raw.get("category")
+                or job_obj.raw.get("sector")
+            )
+        if not source_industry and job_obj.company and getattr(job_obj.company, "additional_details", None):
+            if isinstance(job_obj.company.additional_details, dict):
+                source_industry = (
+                    job_obj.company.additional_details.get("industry")
+                    or job_obj.company.additional_details.get("sector")
+                )
+        ctx = IndustryContext(
+            title=job_obj.title or "",
+            description_raw=job_obj.description or "",
+            company_name=job_obj.company.name if job_obj.company else "",
+            source_industry_field=source_industry,
+        )
+        tags = determine_industry(ctx)
+        job_obj.industry_tags = ", ".join(tags) if tags else ""
+    except Exception as e:
+        logger_instance.warning("Industry determination failed for %s: %s", job_obj.title, e)
+
+
 # Map platform to fetcher function
 PLATFORM_TO_FETCHER = {
     "greenhouse": fetchers.fetch_greenhouse,
@@ -234,42 +270,7 @@ class Command(BaseCommand):
                             job_obj.location_country = norm.get("location_country")
                             job_obj.visa_sponsorship = extract_visa_sponsorship(job_obj.description) or "unknown"
                             job_obj.work_authorization_required = extract_work_authorization_required(job_obj.description) or "unknown"
-                            
-                            # Determine industry_tags (only if new job, company changed, title/description changed, or currently empty)
-                            should_compute_industry = (
-                                created or
-                                not job_obj.industry_tags or
-                                job_obj.title != j.get("title") or
-                                job_obj.description != j.get("description")
-                            )
-                            if should_compute_industry:
-                                try:
-                                    # Try to get source-provided industry from raw or company.additional_details
-                                    source_industry = None
-                                    if isinstance(job_obj.raw, dict):
-                                        source_industry = (
-                                            job_obj.raw.get("industry")
-                                            or job_obj.raw.get("category")
-                                            or job_obj.raw.get("sector")
-                                        )
-                                    if not source_industry and job_obj.company and hasattr(job_obj.company, "additional_details"):
-                                        if isinstance(job_obj.company.additional_details, dict):
-                                            source_industry = (
-                                                job_obj.company.additional_details.get("industry")
-                                                or job_obj.company.additional_details.get("sector")
-                                            )
-                                    
-                                    ctx = IndustryContext(
-                                        title=job_obj.title or "",
-                                        description_raw=job_obj.description or "",
-                                        company_name=job_obj.company.name if job_obj.company else "",
-                                        source_industry_field=source_industry,
-                                    )
-                                    tags = determine_industry(ctx)
-                                    job_obj.industry_tags = ", ".join(tags) if tags else ""
-                                except Exception as e:
-                                    logger.warning(f"Industry determination failed for {job_obj.title}: {e}")
-                            
+                            _compute_industry_tags(job_obj, j, created, logger)
                             job_obj.save(update_fields=[
                                 "work_mode", "seniority", "role_category", "min_years_experience",
                                 "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates",
@@ -279,6 +280,11 @@ class Command(BaseCommand):
                             ])
                         except Exception as e:
                             logger.warning(f"Matching fields normalizer failed for {job_obj.title}: {e}")
+                    else:
+                        # No description/qualifications: still compute industry_tags from title + company
+                        if job_obj.title:
+                            _compute_industry_tags(job_obj, j, created, logger)
+                            job_obj.save(update_fields=["industry_tags"])
                     
                     total += 1
                     company_job_count += 1

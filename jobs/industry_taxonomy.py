@@ -44,6 +44,16 @@ COMPANY_INDUSTRY_MAP: Dict[str, List[str]] = {
     "sap": ["enterprise software", "saas"],
     "siemens": ["industrial", "engineering"],
     "zalando": ["e-commerce", "retail"],
+    # From fetch_jobs COMPANIES list
+    "intercom": ["saas", "customer engagement"],
+    "figma": ["saas", "design"],
+    "spotify": ["media", "streaming"],
+    "airbnb": ["e-commerce", "travel", "marketplace"],
+    "doordash": ["e-commerce", "logistics", "delivery"],
+    "spacex": ["aerospace", "engineering"],
+    "cloudflare": ["saas", "cloud", "infrastructure"],
+    "xometry": ["e-commerce", "industrial", "manufacturing"],
+    "reddit": ["media", "social"],
 }
 
 
@@ -94,7 +104,9 @@ def _from_source_industry(ctx: IndustryContext) -> List[str]:
     if not ctx.source_industry_field:
         return []
 
-    raw = ctx.source_industry_field
+    raw = str(ctx.source_industry_field).strip() if ctx.source_industry_field else ""
+    if not raw:
+        return []
     # Many APIs provide comma-separated industries/categories
     parts: Iterable[str] = re.split(r"[,/]", raw)
     normalized: List[str] = []
@@ -116,7 +128,13 @@ def _from_company(ctx: IndustryContext) -> List[str]:
     company_key = _normalize_company_name(ctx.company_name)
     if not company_key:
         return []
-    return COMPANY_INDUSTRY_MAP.get(company_key, [])
+    # Exact match first (e.g. "stripe")
+    tags = COMPANY_INDUSTRY_MAP.get(company_key, [])
+    if tags:
+        return tags
+    # Fallback: match by first word so "stripe inc" / "stripe" both match
+    first_word = company_key.split()[0] if company_key.split() else ""
+    return COMPANY_INDUSTRY_MAP.get(first_word, [])
 
 
 def _from_keywords(ctx: IndustryContext) -> List[str]:
