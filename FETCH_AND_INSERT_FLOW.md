@@ -83,6 +83,189 @@ For every job that has `title` and (`description` or `qualifications`), the comm
 | visa_sponsorship | `visa_sponsorship` |
 | work_authorization_required | `work_authorization_required` |
 
+### 5.1 Industry matching (industryTags)
+
+You are working on the Breneo job aggregator backend.
+
+**Task:** Implement logic that determines and stores the `industryTags` field for each job during ingestion.
+
+**Important:**
+
+- Only implement **industry** logic (no changes to skills, seniority, etc.).
+- Industry must be **deterministic and explainable**.
+- Never invent industries with low confidence – if unsure, leave empty.
+
+#### 5.1.1 Job field
+
+Jobs table already contains:
+
+- `industryTags`: string (comma-separated canonical tags), e.g.:
+  - `"fintech, banking"`
+  - `"e-commerce, retail"`
+
+Rules for tags:
+
+- lowercase
+- canonical (no synonyms)
+- deduplicated
+- sorted alphabetically
+
+If no industry can be determined, leave `industryTags` empty / null.
+
+#### 5.1.2 Determination priority
+
+Industry is determined in this **exact order**:
+
+**Step 1 – Source-provided industry (highest priority)**
+
+If the job source API provides an `industry` / `category` / `sector` field:
+
+- normalize it using `INDUSTRY_SYNONYMS` (see below)
+- store canonical tag(s) into `industryTags`
+- **stop** (no further inference)
+
+**Step 2 – Company industry map (primary logic)**
+
+Use a deterministic company-to-industry mapping:
+
+- `COMPANY_INDUSTRY_MAP: Record<string, string[]>`
+
+Example:
+
+```text
+{
+  "paypal": ["fintech","payments"],
+  "stripe": ["fintech","payments"],
+  "amazon": ["e-commerce","retail","cloud"],
+  "sap": ["enterprise software","saas"],
+  "siemens": ["industrial","engineering"],
+  "zalando": ["e-commerce","retail"]
+}
+```
+
+Process:
+
+- normalize `companyName`:
+  - lowercase
+  - trim
+  - remove punctuation
+- lookup in `COMPANY_INDUSTRY_MAP`
+- if found:
+  - use those tags
+  - **stop**
+
+**Step 3 – High-confidence keyword inference (fallback)**
+
+Only used if:
+
+- no industry from source, and
+- no company match.
+
+Create:
+
+- `KEYWORD_INDUSTRY_MAP: Record<string, string[]>`
+
+Example:
+
+```text
+{
+  "fintech": ["payment","bank","card","lending","kyc","aml","trading"],
+  "e-commerce": ["checkout","cart","order","storefront","marketplace","shop"],
+  "healthcare": ["patient","clinical","hospital","ehr","medical"],
+  "gaming": ["game","unity","unreal","multiplayer","gaming"],
+  "education": ["student","learning","edtech","course","academy"],
+  "logistics": ["delivery","warehouse","fleet","logistics","shipment"]
+}
+```
+
+Inference rules:
+
+- combine `title` + `descriptionRaw` into one text block
+- lowercase it
+- for each industry:
+  - count how many keywords appear
+- assign an industry **only if**:
+  - `keywordCount >= 2`, **or**
+  - title contains the industry name explicitly
+
+If no industry meets the rule, leave `industryTags` empty.
+
+#### 5.1.3 Synonym normalization
+
+Create:
+
+- `INDUSTRY_SYNONYMS: Record<string, string>`
+
+Example:
+
+```text
+{
+  "financial services": "fintech",
+  "banking": "banking",
+  "payments": "payments",
+  "ecommerce": "e-commerce",
+  "retail tech": "retail",
+  "health tech": "healthcare",
+  "medtech": "healthcare",
+  "edtech": "education",
+  "saas": "saas",
+  "enterprise software": "enterprise software"
+}
+```
+
+When receiving any industry text:
+
+- lowercase
+- trim
+- map via `INDUSTRY_SYNONYMS`
+- if not found, keep the cleaned value as-is
+
+#### 5.1.4 Final formatting
+
+Before saving:
+
+- deduplicate tags
+- sort alphabetically
+- join with comma and space
+
+Example:
+
+- `["payments","fintech","banking"]`
+- → `["banking","fintech","payments"]`
+- → `"banking, fintech, payments"`
+
+If the array is empty, store null / empty string (consistent with the current schema).
+
+#### 5.1.5 Integration into fetch/upsert flow
+
+In the job ingestion / upsert pipeline, **after** mapping raw job fields:
+
+1. Call:
+
+   - `industryTags = determineIndustry({ title, descriptionRaw, companyName, sourceIndustryField })`
+
+2. Set:
+
+   - `job.industryTags = industryTags`
+
+3. Continue normal upsert.
+
+Only regenerate `industryTags` if:
+
+- job is new, or
+- `companyName` changed, or
+- `title` or `description` changed, or
+- `industryTags` is currently empty.
+
+#### 5.1.6 Test cases (examples)
+
+- Case 1: `company = "PayPal"` → `industryTags = "fintech, payments"`
+- Case 2: `company = unknown`, `title = "Senior FinTech Backend Engineer"` → `industryTags = "fintech"`
+- Case 3: `company = unknown`, description contains `"checkout"` and `"order management"` → `industryTags = "e-commerce"`
+- Case 4: `company = unknown`, very generic text → `industryTags = ""` (empty)
+- Case 5: source provides `"Financial Services"` → `industryTags = "fintech"`
+
+
 So every fetched job (new or updated) gets these matching fields filled from the normalizer.
 
 ## 6. Summary – “every detail” on fetch

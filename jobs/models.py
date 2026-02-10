@@ -227,6 +227,15 @@ class Job(models.Model):
     is_low_quality = models.BooleanField(default=False)
     is_duplicate = models.BooleanField(default=False)
 
+    # Canonical industry tags for matching/filtering (comma-separated string)
+    # Stored as: "banking, fintech, payments"
+    industry_tags = models.TextField(
+        blank=True,
+        null=True,
+        db_column="industryTags",
+        help_text="Canonical industry tags, comma-separated, lowercase, deduplicated, sorted alphabetically",
+    )
+
     description = models.TextField(blank=True, null=True)
     
     # Extracted sections from description using AI
@@ -404,6 +413,17 @@ class Job(models.Model):
                             })
             except Exception as e:
                 logger.warning(f"Failed to process job description: {e}")
+
+        # Normalize industry_tags formatting (lowercase, dedupe, sort, comma+space)
+        if self.industry_tags:
+            try:
+                # Split on comma, trim whitespace, lowercase, drop empties
+                raw_tags = [t.strip().lower() for t in self.industry_tags.split(",")]
+                unique = sorted({t for t in raw_tags if t})
+                self.industry_tags = ", ".join(unique) if unique else ""
+            except Exception:
+                # If normalization fails, keep original string to avoid data loss
+                pass
 
         # Populate matching fields from title + description (catalog-based extraction)
         # Regenerate when title/description available and (new job OR derived fields empty)
