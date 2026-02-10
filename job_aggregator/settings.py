@@ -29,6 +29,11 @@ ALLOWED_HOSTS = [
     ".railway.app",  # Add generic railway support
 ]
 
+# Domains that are allowed for CSRF-protected requests (e.g. Django admin on Railway)
+CSRF_TRUSTED_ORIGINS = [
+    "https://breneo-job-aggregator.up.railway.app",
+]
+
 allowed_hosts_env = os.environ.get("ALLOWED_HOSTS")
 if allowed_hosts_env:
     if allowed_hosts_env == "*":
