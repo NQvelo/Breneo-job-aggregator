@@ -213,11 +213,12 @@ The repo includes a **`railway.toml`** that sets the correct start command (and 
 
 If workers are killed with `WORKER TIMEOUT` or "Perhaps out of memory?" every ~30 seconds:
 
-- **Use the repo’s start command** so the 120s timeout and 1 worker are applied: either leave **Start Command** empty in Railway (so the **Procfile** is used) or set it to:
+- **Use the repo’s start command** so the 300s timeout and 1 worker are applied: either leave **Start Command** empty in Railway (so the **Procfile** is used) or set it to:
   ```bash
-  gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 120 --workers 1
+  gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 300 --workers 1
   ```
-  The **Procfile** and **railway.toml** in this repo already include `--timeout 120 --workers 1`; a custom start command in the Railway dashboard **overrides** them, so if you set one, it must include `--timeout 120`.
+  The **Procfile** and **railway.toml** in this repo already include `--timeout 300 --workers 1`; a custom start command in the Railway dashboard **overrides** them, so if you set one, it must include `--timeout 300`.
+- **Point Railway’s health check at `/health/`**: The app exposes a minimal **`/health/`** endpoint (no DB, no template). In your web service → **Settings** → **Health Check**, set the path to **`/health/`** (or **`/health`**). That way the first request after boot is fast and the worker is less likely to hit the timeout.
 - Increase the service **memory** in Railway if the plan allows it.
 - Ensure the **database is running** before the web service; "database container is starting up" can make the app hang during startup and hit the timeout.
 
