@@ -12,12 +12,18 @@ class Command(BaseCommand):
             "--limit",
             type=int,
             default=50,
-            help="Number of most recent jobs to update (default: 50).",
+            help="Number of most recent jobs to update (default: 50). Use with --all to ignore.",
+        )
+        parser.add_argument(
+            "--all",
+            action="store_true",
+            help="Update every job in the table (no limit).",
         )
 
     def handle(self, *args, **options):
-        limit = options["limit"]
-        qs = Job.objects.order_by("-fetched_at")[:limit]
+        qs = Job.objects.order_by("-fetched_at")
+        if not options.get("all"):
+            qs = qs[: options["limit"]]
 
         updated = 0
         for job in qs:

@@ -180,22 +180,38 @@ class Command(BaseCommand):
                         continue
                     found_ids.add(ext_id)
 
-                    # Create/update Job
+                    # Parse posted_at only when fetcher provided it; avoid overwriting with None
+                    raw_posted = j.get("posted_at")
+                    parsed_posted = parse_date(raw_posted) if raw_posted else None
+                    defaults = {
+                        "title": j.get("title") or "",
+                        "company": company_obj,
+                        "location": j.get("location"),
+                        "description": j.get("description"),
+                        "apply_url": j.get("apply_url") or ext_id,
+                        "raw": j.get("raw") or {},
+                        "is_active": True,
+                    }
+                    if parsed_posted is not None:
+                        defaults["posted_at"] = parsed_posted
+
                     job_obj, created = Job.objects.update_or_create(
                         platform=platform,
                         external_job_id=ext_id,
-                        defaults={
-                            "title": j.get("title") or "",
-                            "company": company_obj,
-                            "location": j.get("location"),
-                            "description": j.get("description"),
-                            "apply_url": j.get("apply_url") or ext_id,
-                            "posted_at": parse_date(j.get("posted_at")) if j.get("posted_at") else None,
-                            "raw": j.get("raw") or {},
-                            "is_active": True,
-                        },
+                        defaults=defaults,
                     )
-                    
+
+                    # If posted_at still missing, try raw (first_published, updated_at, created_at)
+                    if not job_obj.posted_at and isinstance(job_obj.raw, dict):
+                        for key in ("first_published", "updated_at", "created_at", "postDate", "datePosted"):
+                            val = job_obj.raw.get(key)
+                            if val:
+                                filled = parse_date(val)
+                                if filled:
+                                    job_obj.posted_at = filled
+                                    job_obj.save(update_fields=["posted_at"])
+                                    break
+
                     # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary, workplace_type, skills_required)
                     if job_obj.description:
                         try:

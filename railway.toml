@@ -1,0 +1,10 @@
+# Railway project config (optional). Ensures correct start command if not overridden in dashboard.
+# See: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 120 --workers 1"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

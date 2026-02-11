@@ -192,3 +192,32 @@ You can keep using SQLite locally, or switch to PostgreSQL:
 - Your Django project is already configured to use **`DATABASE_URL`** for PostgreSQL when present, and **SQLite** otherwise.
 - Setting `DATABASE_URL` on the Django service + running `python manage.py migrate` is the key step to fully switch to PostgreSQL on Railway.
 
+---
+
+## 9. Troubleshooting
+
+### `ModuleNotFoundError: No module named 'breneo'`
+
+The Django project module is **`job_aggregator`**, not `breneo`. If the start command on Railway is set to something like `gunicorn breneo.wsgi`, change it:
+
+1. Open your **web service** in Railway → **Settings** (or **Deploy**).
+2. Set **Start Command** to:
+   ```bash
+   gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file -
+   ```
+   Or leave it **empty** so Railway uses the **Procfile** (`web: gunicorn job_aggregator.wsgi --log-file -`). If you use the Procfile, ensure the service is set to use the `web` process.
+
+The repo includes a **`railway.toml`** that sets the correct start command (and a longer timeout, single worker) so the dashboard does not need a custom start command.
+
+### Worker timeout / "Perhaps out of memory?"
+
+If workers are killed with `WORKER TIMEOUT` or "Perhaps out of memory?" every ~30 seconds:
+
+- **Use the repo’s start command** so the 120s timeout and 1 worker are applied: either leave **Start Command** empty in Railway (so the **Procfile** is used) or set it to:
+  ```bash
+  gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 120 --workers 1
+  ```
+  The **Procfile** and **railway.toml** in this repo already include `--timeout 120 --workers 1`; a custom start command in the Railway dashboard **overrides** them, so if you set one, it must include `--timeout 120`.
+- Increase the service **memory** in Railway if the plan allows it.
+- Ensure the **database is running** before the web service; "database container is starting up" can make the app hang during startup and hit the timeout.
+
