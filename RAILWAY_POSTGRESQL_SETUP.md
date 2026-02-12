@@ -211,7 +211,11 @@ The repo includes a **`railway.toml`** that sets the correct start command (and 
 
 ### Worker timeout / "Perhaps out of memory?"
 
-If workers are killed with `WORKER TIMEOUT` or "Perhaps out of memory?" every ~30 seconds:
+If workers are killed with `WORKER TIMEOUT` or "Perhaps out of memory?" every ~30–120 seconds:
+
+**→ See [RAILWAY_START_COMMAND.md](RAILWAY_START_COMMAND.md)** for step-by-step: set (or clear) the Start Command in the Railway dashboard so the app uses `--timeout 300 --workers 1 --preload`. A custom Start Command in the dashboard **overrides** the Procfile and `railway.toml`, so it must include the timeout or be left empty.
+
+Summary:
 
 - **Use the repo’s start command** so the 300s timeout and 1 worker are applied: either leave **Start Command** empty in Railway (so the **Procfile** is used) or set it to:
   ```bash

@@ -5,6 +5,6 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 300 --workers 1"
+startCommand = "gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 300 --workers 1 --preload"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10

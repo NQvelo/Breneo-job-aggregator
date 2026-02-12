@@ -1,5 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction, connection
+from django.utils import timezone
+from datetime import timedelta
 from django.conf import settings as django_settings
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description
@@ -194,6 +196,20 @@ class Command(BaseCommand):
                     }
                     if parsed_posted is not None:
                         defaults["posted_at"] = parsed_posted
+
+                        # Check if job is older than 5 months (approx 150 days)
+                        cutoff_date = timezone.now() - timedelta(days=150)
+                        
+                        # parsed_posted might be offset-naive or offset-aware
+                        # Ensure we compare correctly
+                        if timezone.is_aware(parsed_posted):
+                            check_date = parsed_posted
+                        else:
+                            check_date = timezone.make_aware(parsed_posted, timezone.get_current_timezone())
+                            
+                        if check_date < cutoff_date:
+                            self.stdout.write(f"  ⊘ Skipping job '{defaults['title']}' - posted too long ago ({parsed_posted})")
+                            continue
 
                     job_obj, created = Job.objects.update_or_create(
                         platform=platform,
