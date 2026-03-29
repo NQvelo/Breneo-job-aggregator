@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings as django_settings
 from jobs.models import Company, Job
-from jobs.utils import parse_date, process_job_description
+from jobs.utils import parse_date, process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.job_normalizer import normalize_job_fields
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
@@ -101,13 +101,25 @@ PLATFORM_TO_FETCHER = {
 class Command(BaseCommand):
     help = "Fetch jobs from configured companies and store/update in DB"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--max-jobs",
+            type=int,
+            default=None,
+            metavar="N",
+            help="Stop after saving/updating N jobs (useful for capped imports). Default: no limit.",
+        )
+
     def handle(self, *args, **options):
+        max_jobs = options.get("max_jobs")
         try:
             # Verify database connection
             from django.db import connection
             connection.ensure_connection()
             
             self.stdout.write(self.style.SUCCESS("Starting job fetch..."))
+            if max_jobs is not None:
+                self.stdout.write(f"  (max {max_jobs} job(s))")
             logger.info("Starting job fetch command")
             
         except Exception as e:
@@ -118,7 +130,11 @@ class Command(BaseCommand):
         
         total = 0
         errors = []
+        stop_fetching = False
+
         for comp in COMPANIES:
+            if stop_fetching:
+                break
             platform = comp.get("platform")
             company_name = comp.get("name")
             company_logo = get_logo_url(company_name)
@@ -173,9 +189,11 @@ class Command(BaseCommand):
 
             found_ids = set()
             company_job_count = 0
+            company_complete = True
+            n_feed = len(jobs_data)
             # Process jobs in batches to avoid transaction issues
             batch_size = 50
-            for j in jobs_data:
+            for idx, j in enumerate(jobs_data):
                 try:
                     ext_id = j.get("external_job_id") or j.get("apply_url")
                     if not ext_id:
@@ -263,8 +281,12 @@ class Command(BaseCommand):
                             processed = process_job_description(job_obj.description)
                             if processed:
                                 updated = False
-                                if processed.get("benefits"):
-                                    job_obj.benefits = processed.get("benefits")
+                                b = processed.get("benefits")
+                                if b and is_valid_benefits_text(b):
+                                    job_obj.benefits = b
+                                    updated = True
+                                elif job_obj.benefits and not is_valid_benefits_text(job_obj.benefits):
+                                    job_obj.benefits = ""
                                     updated = True
                                 if not job_obj.structured_description:
                                     job_obj.structured_description = {}
@@ -322,6 +344,12 @@ class Command(BaseCommand):
                     
                     total += 1
                     company_job_count += 1
+
+                    if max_jobs is not None and total >= max_jobs:
+                        if idx + 1 < n_feed:
+                            company_complete = False
+                        stop_fetching = True
+                        break
                     
                     # Commit in batches to ensure persistence without slowing down too much
                     if company_job_count % batch_size == 0:
@@ -333,15 +361,17 @@ class Command(BaseCommand):
                     logger.exception(error_msg)
                     errors.append(error_msg)
 
-            # Mark old jobs inactive
+            # Mark old jobs inactive (only if we processed the full feed for this company;
+            # skip when --max-jobs stopped mid-company to avoid wrong inactive flags)
             try:
-                qs = Job.objects.filter(platform=platform, company=company_obj)
-                if found_ids:
-                    inactive_count = qs.exclude(external_job_id__in=found_ids).update(is_active=False)
-                    if inactive_count > 0:
-                        self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
-                        # Explicitly commit transaction
-                        transaction.commit()
+                if company_complete:
+                    qs = Job.objects.filter(platform=platform, company=company_obj)
+                    if found_ids:
+                        inactive_count = qs.exclude(external_job_id__in=found_ids).update(is_active=False)
+                        if inactive_count > 0:
+                            self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
+                            # Explicitly commit transaction
+                            transaction.commit()
             except Exception as e:
                 error_msg = f"Failed to mark inactive jobs for {company_name} ({platform}): {str(e)}"
                 logger.exception(error_msg)

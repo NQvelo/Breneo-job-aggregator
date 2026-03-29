@@ -64,6 +64,65 @@ def preprocess(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# A2) STRIP ATS BOILERPLATE (pay stubs, ITAR, placeholders)
+# ---------------------------------------------------------------------------
+
+# Truncate at first line that starts a known non-content tail (SpaceX / Greenhouse style).
+_BOILERPLATE_TAIL_HEADERS = [
+    r"(?im)^\s*pay\s+range\s*:?\s*$",
+    r"(?im)^\s*education\s+required\s*:?\s*$",
+    r"(?im)^\s*itar\s+requirements?\s*:?\s*$",
+    r"(?im)^\s*job\s+details\s*:?\s*$",
+    r"(?im)^\s*compensation\s+information\s*:?\s*$",
+]
+
+
+def strip_boilerplate_tail(text: str) -> str:
+    """Truncate text at the first boilerplate section header (pay range, ITAR, etc.)."""
+    if not text:
+        return text
+    cut = len(text)
+    for p in _BOILERPLATE_TAIL_HEADERS:
+        m = re.search(p, text)
+        if m:
+            cut = min(cut, m.start())
+    if cut < len(text):
+        return text[:cut].rstrip()
+    return text
+
+
+def strip_noise_lines(text: str) -> str:
+    """Remove standalone placeholder lines sometimes scraped from ATS widgets."""
+    if not text:
+        return text
+    drop = frozenset({"education_required", "base"})
+    out: list[str] = []
+    for line in text.split("\n"):
+        ls = line.strip().lower()
+        if ls in drop:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def strip_trailing_benefits_heading(text: str) -> str:
+    """Remove a trailing empty 'Benefits' section header left after tail truncation."""
+    t = text.rstrip()
+    t = re.sub(r"\n\s*Benefits\s*$", "", t, flags=re.IGNORECASE)
+    return t.rstrip()
+
+
+def strip_job_posting_text(text: str) -> str:
+    """Full pipeline: remove ATS tail junk and placeholders before section parsing."""
+    if not text:
+        return ""
+    t = strip_boilerplate_tail(text)
+    t = strip_noise_lines(t)
+    t = strip_trailing_benefits_heading(t)
+    return t
+
+
+# ---------------------------------------------------------------------------
 # B) HEADING DETECTION (MULTI-SIGNAL SCORING)
 # ---------------------------------------------------------------------------
 
@@ -112,6 +171,7 @@ _QUALIFICATION_KEYWORDS = frozenset([
     "what you need", "you have", "must have", "nice to have", "qualifications",
     "required experience", "desired qualifications", "about you", "you bring",
     "candidate profile", "ideal candidate",
+    "basic qualifications", "preferred skills", "skills and experience",
 ])
 
 _INTRO_KEYWORDS = frozenset([
@@ -126,6 +186,7 @@ _IGNORE_KEYWORDS = frozenset([
     "equal opportunity", "eeo", "inclusion", "belonging", "accommodation",
     "privacy", "how to apply", "application process", "legal", "disclaimer",
     "pay transparency", "applicant", "diversity", "accessibility",
+    "education required", "itar", "compensation information",
 ])
 
 
@@ -508,6 +569,20 @@ def extract_workplace_type_and_skills(
 # ---------------------------------------------------------------------------
 
 
+def _is_boilerplate_paragraph(p: str) -> bool:
+    """True if paragraph looks like pay/legal/ITAR tail content, not role duties."""
+    pl = p.lower().strip()
+    if len(pl) < 12:
+        return True
+    if re.search(
+        r"pay\s+range|itar\s+requirements?|education\s+required|your\s+actual\s+level|"
+        r"compensation\s+information|equal\s+opportunity",
+        pl,
+    ):
+        return True
+    return False
+
+
 def _fallback_bullet_items_from_text(text: str, max_items: int = 8) -> list[str]:
     """
     Derive bullet items from raw text when section parsing finds nothing.
@@ -517,7 +592,11 @@ def _fallback_bullet_items_from_text(text: str, max_items: int = 8) -> list[str]
         return []
     text = text.strip()
     # Prefer paragraphs (double newline)
-    paras = [p.strip() for p in text.split("\n\n") if p.strip() and len(p.strip()) >= 20]
+    paras = [
+        p.strip()
+        for p in text.split("\n\n")
+        if p.strip() and len(p.strip()) >= 20 and not _is_boilerplate_paragraph(p)
+    ]
     items: list[str] = []
     for p in paras:
         if len(p) <= 240 and not p.endswith(":"):
@@ -650,7 +729,7 @@ def parse_job_posting(raw_text: str) -> ParsedJobPosting:
     Parse raw job posting text into structured job description, responsibilities, qualifications.
     Returns a ParsedJobPosting (use .to_dict() for dict output).
     """
-    text = preprocess(raw_text or "")
+    text = strip_job_posting_text(preprocess(raw_text or ""))
     sections = parse_sections(text)
 
     responsibilities: list[str] = []
@@ -733,7 +812,7 @@ def parse_job_posting_for_db(
     summary = parsed.job_description or ""
 
     if raw:
-        preprocessed = preprocess(raw)
+        preprocessed = strip_job_posting_text(preprocess(raw))
         if not summary and preprocessed.strip():
             cleaned = _strip_excluded_from_text(preprocessed)
             if cleaned:

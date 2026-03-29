@@ -241,7 +241,10 @@ def process_job_description(description_text):
         logger.warning(f"AI processing failed: {e}. Using fallback method.")
     
     # Fallback: Use pattern matching and basic extraction
-    return _process_with_patterns(description_text)
+    result = _process_with_patterns(description_text)
+    if result and result.get("benefits") and not is_valid_benefits_text(result["benefits"]):
+        result["benefits"] = None
+    return result
 
 def _process_with_ai(description_text):
     """
@@ -322,13 +325,14 @@ _BENEFITS_SECTION_PATTERNS = [
 ]
 
 # Keywords for detecting benefits when no explicit section exists
+# (Avoid loose terms like "education" or "remote" — they match normal job narrative.)
 _BENEFITS_KEYWORDS = [
     'health insurance', 'dental', 'vision', 'medical coverage',
     'pto', 'vacation', 'parental leave', 'paid leave', 'sick leave',
     'equity', 'stock options', '401k', '401(k)', 'retirement',
     'bonus', 'performance bonus', 'annual bonus',
-    'remote', 'work from home', 'flexible work', 'flexible hours',
-    'learning budget', 'learning stipend', 'education', 'training',
+    'flexible work', 'flexible hours',
+    'learning budget', 'learning stipend', 'tuition reimbursement', 'tuition assistance', 'training stipend',
     'travel credits', 'gym', 'wellness', 'mental health',
     'free meals', 'catered', 'snacks', 'coffee',
     'unlimited pto', 'unlimited vacation',
@@ -341,7 +345,35 @@ _BENEFITS_EXCLUDE_PATTERNS = [
     r'\b(?:remote|hybrid|onsite)\b.*\b(?:only|eligible|required)\b',
     r'\b(?:equal opportunity|eeo|affirmative action|inclusion|accommodation)\b',
     r'\b(?:privacy|legal|disclaimer|applicant)\b',
+    r'\bpay\s+range\b',
+    r'\bitar\b',
+    r'\byour\s+actual\s+level\b',
+    r'^base\s*$',
+    r'\beducation_required\b',
 ]
+
+
+def is_valid_benefits_text(s) -> bool:
+    """
+    True only if benefits text looks like real perks, not pay stubs / ITAR / ATS placeholders.
+    """
+    if not s or not str(s).strip():
+        return False
+    raw = str(s).strip()
+    low = raw.lower()
+    if any(
+        x in low
+        for x in (
+            "pay range",
+            "itar requirement",
+            "your actual level",
+            "education_required",
+            "compensation information",
+        )
+    ):
+        return False
+    formatted = _filter_and_format_benefits(raw)
+    return bool(formatted and formatted.strip())
 
 
 def _is_benefit_line_excluded(line: str) -> bool:
@@ -401,8 +433,12 @@ def _process_with_patterns(description_text):
     """
     Fallback method using pattern matching to extract structured information.
     """
+    from jobs.job_posting_parser import strip_job_posting_text
+
+    # Strip pay/ITAR/education tails before pattern extraction
+    cleaned_text = strip_job_posting_text(description_text or "")
     # Remove irrelevant sections
-    cleaned_text = _remove_irrelevant_sections(description_text)
+    cleaned_text = _remove_irrelevant_sections(cleaned_text)
     
     result = {
         'summary': None,
@@ -448,6 +484,8 @@ def _process_with_patterns(description_text):
     elif not result['benefits']:
         # Keyword-based fallback when no explicit benefits section found
         result['benefits'] = _extract_benefits_by_keywords(cleaned_text)
+    if result.get("benefits") and not is_valid_benefits_text(result["benefits"]):
+        result["benefits"] = None
     
     # Create summary from first few sentences
     sentences = cleaned_text.split('. ')

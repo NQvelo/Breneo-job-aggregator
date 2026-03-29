@@ -511,10 +511,6 @@ components:
           type: string
           nullable: true
           description: Extracted qualifications/requirements section from job description
-        benefits:
-          type: string
-          nullable: true
-          description: Benefits section from job posting, if available
         apply_url:
           type: string
           format: uri

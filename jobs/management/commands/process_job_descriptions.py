@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import models
 from jobs.models import Job
-from jobs.utils import process_job_description
+from jobs.utils import process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import extract_workplace_type_and_skills
 import logging
 
@@ -71,8 +71,9 @@ class Command(BaseCommand):
                     if processed_data.get('qualifications'):
                         job.qualifications = processed_data.get('qualifications')
                         updated = True
-                    if processed_data.get('benefits'):
-                        job.benefits = processed_data.get('benefits')
+                    b = processed_data.get("benefits")
+                    if b and is_valid_benefits_text(b):
+                        job.benefits = b
                         updated = True
                     if not job.structured_description:
                         job.structured_description = {}

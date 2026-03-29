@@ -56,14 +56,14 @@ class JobAdmin(admin.ModelAdmin):
         "industry_tags",
     )
     list_filter = ("platform", "company", "work_mode", "seniority", "is_active")
-    search_fields = ("title", "company__name", "location", "workplace_type", "description", "responsibilities", "qualifications", "benefits", "role_category")
+    search_fields = ("title", "company__name", "location", "workplace_type", "description", "responsibilities", "qualifications", "role_category")
     ordering = ("-posted_at", "-fetched_at")
     fieldsets = (
         ("Basic Information", {
             "fields": ("title", "company", "location", "location_country", "platform", "external_job_id")
         }),
-        ("Job Details", {
-            "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "benefits", "apply_url")
+        ("Description & role", {
+            "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "apply_url")
         }),
         ("Matching Fields", {
             "fields": (

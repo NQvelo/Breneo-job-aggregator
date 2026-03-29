@@ -35,7 +35,7 @@ class JobSerializer(DynamicFieldsModelSerializer):
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
-            'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications', 'benefits',
+            'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications',
             'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
@@ -111,7 +111,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
-            'description', 'description_short', 'responsibilities', 'qualifications', 'benefits',
+            'description', 'description_short', 'responsibilities', 'qualifications',
             'apply_url', 'platform', 'external_job_id',
             'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
@@ -229,7 +229,6 @@ def job_to_dict(job):
             "description_short": job.get_description_short(max_lines=4, max_chars=400),
             "responsibilities": job.responsibilities,
             "qualifications": job.qualifications,
-            "benefits": job.benefits,
             "apply_url": job.apply_url,
             "platform": job.platform,
             "external_job_id": job.external_job_id,
@@ -254,7 +253,6 @@ def job_to_dict(job):
             "description_short": description_short,
             "responsibilities": job.get("responsibilities"),
             "qualifications": job.get("qualifications"),
-            "benefits": job.get("benefits"),
             "apply_url": job.get("apply_url"),
             "platform": job.get("platform"),
             "external_job_id": job.get("external_job_id"),

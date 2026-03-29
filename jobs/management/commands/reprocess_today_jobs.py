@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from jobs.models import Job
 from jobs.job_posting_parser import parse_job_posting_for_db
-from jobs.utils import process_job_description
+from jobs.utils import process_job_description, is_valid_benefits_text
 from jobs.job_normalizer import normalize_job_fields
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 
@@ -68,7 +68,8 @@ class Command(BaseCommand):
                 # 2) Utils processor (benefits, company_overview, role_description)
                 processed = process_job_description(job.description)
                 if processed:
-                    job.benefits = processed.get("benefits") or ""
+                    b = processed.get("benefits") or ""
+                    job.benefits = b if (b and is_valid_benefits_text(b)) else ""
                     if isinstance(job.structured_description, dict):
                         job.structured_description.update({
                             "company_overview": processed.get("company_overview"),

@@ -392,7 +392,7 @@ class Job(models.Model):
         
         # Process job description for benefits and other structured fields
         if self.description:
-            from .utils import process_job_description
+            from .utils import process_job_description, is_valid_benefits_text
             try:
                 needs_processing = (
                     not self.benefits or
@@ -401,7 +401,7 @@ class Job(models.Model):
                 if needs_processing:
                     processed = process_job_description(self.description)
                     if processed:
-                        if processed.get("benefits") and not self.benefits:
+                        if processed.get("benefits") and is_valid_benefits_text(processed.get("benefits")) and not self.benefits:
                             self.benefits = processed.get("benefits")
                         if not self.structured_description:
                             self.structured_description = {}
@@ -413,6 +413,12 @@ class Job(models.Model):
                             })
             except Exception as e:
                 logger.warning(f"Failed to process job description: {e}")
+
+        # Drop scraped ATS junk stored in benefits (pay range / ITAR placeholders)
+        if self.benefits:
+            from .utils import is_valid_benefits_text
+            if not is_valid_benefits_text(self.benefits):
+                self.benefits = ""
 
         # Normalize industry_tags formatting (lowercase, dedupe, sort, comma+space)
         if self.industry_tags:

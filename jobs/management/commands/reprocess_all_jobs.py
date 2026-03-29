@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from jobs.models import Job
-from jobs.utils import process_job_description
+from jobs.utils import process_job_description, is_valid_benefits_text
 import logging
 import time
 
@@ -67,8 +67,8 @@ class Command(BaseCommand):
                         job.responsibilities = result['responsibilities']
                     if result.get('qualifications'):
                         job.qualifications = result['qualifications']
-                    if result.get('benefits'):
-                        job.benefits = result.get('benefits')
+                    b = result.get("benefits")
+                    job.benefits = b if (b and is_valid_benefits_text(b)) else ""
                     
                     # Store other structured data
                     if not job.structured_description:
