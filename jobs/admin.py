@@ -63,7 +63,7 @@ class JobAdmin(admin.ModelAdmin):
             "fields": ("title", "company", "location", "location_country", "platform", "external_job_id")
         }),
         ("Description & role", {
-            "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "apply_url")
+            "fields": ("description", "workplace_type", "work_mode", "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates", "responsibilities", "qualifications", "salary", "apply_url")
         }),
         ("Matching Fields", {
             "fields": (

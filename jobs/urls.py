@@ -1,5 +1,12 @@
 from django.urls import path
-from .views import JobsGroupedByCompany, JobSearchView, JobDetailsView, CompanyDetailView, TriggerFetchView
+from .views import (
+    JobsGroupedByCompany,
+    JobSearchView,
+    JobDetailsView,
+    CompanyDetailView,
+    EmployerJobCreateView,
+    TriggerFetchView,
+)
 
 urlpatterns = [
     path('', JobsGroupedByCompany.as_view(), name='jobs_grouped_by_company'),  # /api/ will point here
@@ -7,5 +14,6 @@ urlpatterns = [
     path('job-details', JobDetailsView.as_view(), name='job_details'),  # /api/job-details
     path('companies/<str:company_name>', CompanyDetailView.as_view(), name='company_detail'),  # /api/companies/Airbnb
     path('companies', CompanyDetailView.as_view(), name='company_detail_query'),  # /api/companies?name=Airbnb
+    path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
     path('trigger-fetch', TriggerFetchView.as_view(), name='trigger_fetch'),  # /api/trigger-fetch (for external cron)
 ]

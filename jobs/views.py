@@ -18,7 +18,14 @@ from datetime import timedelta
 from urllib.parse import unquote
 import base64
 from .models import Company, Job
-from .serializers import CompanyJobsSerializer, NestedJobSerializer, CompanyDetailSerializer
+from .serializers import (
+    CompanyJobsSerializer,
+    NestedJobSerializer,
+    CompanyDetailSerializer,
+    EmployerJobCreateSerializer,
+)
+from .permissions import CanPostEmployerJob
+from .employer_jobs import create_employer_job
 
 class JobsGroupedByCompany(APIView):
     """
@@ -454,6 +461,40 @@ class JobDetailsView(APIView):
         serializer = NestedJobSerializer(job)
         
         return Response(serializer.data)
+
+
+class EmployerJobCreateView(APIView):
+    """
+    Create a job posted by an employer. Full description is stored in `raw` (employer payload + body)
+    and in `description` so the same parsing/normalization pipeline as fetched jobs runs.
+
+    Auth: set env EMPLOYER_POST_SECRET and send header X-Employer-Key: <secret>, OR use a
+    logged-in user in the Django group "Employer".
+
+    POST JSON body:
+    - title, company (name), location (optional), work_mode (remote|hybrid|onsite|on-site|unknown)
+    - full_description (full text; responsibilities/qualifications/etc. derived on save)
+    - salary (optional), apply_url (optional), is_active (default true)
+    """
+
+    permission_classes = [CanPostEmployerJob]
+
+    def post(self, request):
+        ser = EmployerJobCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        job = create_employer_job(
+            title=data["title"],
+            company_name=data["company"],
+            location=data.get("location") or "",
+            work_mode=data["work_mode"],
+            full_description=data["full_description"],
+            salary=data.get("salary") or "",
+            apply_url=data.get("apply_url") or None,
+            is_active=data.get("is_active", True),
+        )
+        out = NestedJobSerializer(job).data
+        return Response(out, status=status.HTTP_201_CREATED)
 
 
 class TriggerFetchView(APIView):

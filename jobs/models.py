@@ -258,6 +258,14 @@ class Job(models.Model):
     
     apply_url = models.URLField(blank=True, null=True)
 
+    # Compensation as free text (ranges, hourly, equity, etc.)
+    salary = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Salary or compensation summary (as entered or normalized)",
+    )
+
     platform = models.CharField(
         max_length=100,
         help_text="Source platform (greenhouse, lever, ashby, workable, etc.)",
@@ -466,6 +474,17 @@ class Job(models.Model):
                 self.work_authorization_required = extract_work_authorization_required(self.description) or "unknown"
             except Exception as e:
                 logger.warning(f"Job normalizer failed: {e}")
+
+        # Employer-posted jobs: preserve submitted work mode / workplace label (NLP must not override)
+        if self.raw and isinstance(self.raw, dict) and self.raw.get("source") == "employer":
+            submitted = self.raw.get("employer_submitted") or {}
+            wm = submitted.get("work_mode")
+            valid_wm = {c[0] for c in WORK_MODE_CHOICES}
+            if wm in valid_wm:
+                self.work_mode = wm
+            wt = submitted.get("workplace_type")
+            if wt:
+                self.workplace_type = wt
         
         super().save(*args, **kwargs)
 

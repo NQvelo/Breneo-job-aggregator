@@ -36,7 +36,7 @@ class JobSerializer(DynamicFieldsModelSerializer):
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
             'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications',
-            'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
+            'salary', 'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
 
@@ -112,7 +112,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
             'description', 'description_short', 'responsibilities', 'qualifications',
-            'apply_url', 'platform', 'external_job_id',
+            'salary', 'apply_url', 'platform', 'external_job_id',
             'posted_at', 'fetched_at', 'is_active', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at']
@@ -202,6 +202,21 @@ class CompanyJobsSerializer(serializers.ModelSerializer):
         return representation
 
 
+class EmployerJobCreateSerializer(serializers.Serializer):
+    """Payload for employer-posted jobs (enrichment runs on save)."""
+
+    title = serializers.CharField(max_length=500)
+    company = serializers.CharField(max_length=200)
+    location = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    work_mode = serializers.ChoiceField(
+        choices=["remote", "hybrid", "onsite", "on-site", "unknown"],
+    )
+    apply_url = serializers.URLField(required=False, allow_null=True, allow_blank=True)
+    is_active = serializers.BooleanField(default=True)
+    full_description = serializers.CharField()
+    salary = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+
 def job_to_dict(job):
     # job may be Job model instance or dict (from fetcher)
     if hasattr(job, "title"):
@@ -235,6 +250,7 @@ def job_to_dict(job):
             "posted_at": job.posted_at.isoformat() if job.posted_at else None,
             "fetched_at": job.fetched_at.isoformat() if hasattr(job, "fetched_at") and job.fetched_at else None,
             "is_active": job.is_active,
+            "salary": getattr(job, "salary", None),
             "raw": job.raw,
         }
     else:
