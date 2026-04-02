@@ -477,6 +477,10 @@ class EmployerJobCreateView(APIView):
     - salary (optional), apply_url (optional), is_active (default true)
     """
 
+    # Empty auth classes: if we use Session/Basic here, DRF turns a failed permission into
+    # NotAuthenticated ("credentials not provided") when no session/basic succeeds — even when
+    # the real check is X-Employer-Key (see APIView.permission_denied).
+    authentication_classes = []
     permission_classes = [CanPostEmployerJob]
 
     def post(self, request):

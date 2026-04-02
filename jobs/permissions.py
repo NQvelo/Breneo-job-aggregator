@@ -15,8 +15,11 @@ class CanPostEmployerJob(BasePermission):
         if secret:
             if request.headers.get("X-Employer-Key") == secret:
                 return True
+        # Django session user lives on the underlying WSGI request (middleware), not on
+        # DRF's request.user when authentication_classes is empty on the view.
+        django_user = getattr(getattr(request, "_request", request), "user", None)
         return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.groups.filter(name="Employer").exists()
+            django_user
+            and django_user.is_authenticated
+            and django_user.groups.filter(name="Employer").exists()
         )
