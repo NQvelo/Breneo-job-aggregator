@@ -484,6 +484,19 @@ class EmployerJobCreateView(APIView):
     authentication_classes = []
     permission_classes = [CanPostEmployerJob]
 
+    def get(self, request):
+        """
+        Employer dashboard listing (includes active + inactive employer jobs).
+        Public/default job APIs remain active-only.
+        """
+        jobs = (
+            Job.objects.filter(platform="employer")
+            .select_related("company")
+            .order_by("-posted_at", "-fetched_at")
+        )
+        serializer = NestedJobSerializer(jobs, many=True)
+        return Response(serializer.data)
+
     def post(self, request):
         ser = EmployerJobCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
