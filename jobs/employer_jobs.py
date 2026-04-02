@@ -88,3 +88,62 @@ def create_employer_job(
     )
     job.save()
     return job
+
+
+def get_employer_job_or_none(job_id: int) -> Job | None:
+    return Job.objects.filter(id=job_id, platform="employer").select_related("company").first()
+
+
+def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
+    company_name = payload.get("company")
+    if company_name is not None:
+        company_name = str(company_name).strip()
+        if not company_name:
+            raise ValueError("company_name cannot be empty")
+        company, _ = Company.objects.get_or_create(
+            name=company_name,
+            defaults={"platform": "employer"},
+        )
+        job.company = company
+
+    if "title" in payload:
+        job.title = (payload.get("title") or "").strip()
+    if "location" in payload:
+        job.location = (payload.get("location") or "").strip() or None
+    if "apply_url" in payload:
+        job.apply_url = payload.get("apply_url") or None
+    if "salary" in payload:
+        job.salary = (payload.get("salary") or "").strip() or None
+    if "is_active" in payload:
+        job.is_active = bool(payload.get("is_active"))
+
+    wm = None
+    wt_display = None
+    if "work_mode" in payload:
+        wm, wt_display = _normalize_work_mode(str(payload.get("work_mode") or ""))
+        job.work_mode = wm
+        if wt_display:
+            job.workplace_type = wt_display
+
+    if "full_description" in payload:
+        full_description = (payload.get("full_description") or "").strip()
+        job.description = full_description
+
+    raw = job.raw if isinstance(job.raw, dict) else {}
+    submitted = raw.get("employer_submitted") if isinstance(raw.get("employer_submitted"), dict) else {}
+    submitted["title"] = job.title
+    submitted["company"] = job.company.name
+    submitted["location"] = job.location or ""
+    submitted["work_mode"] = wm or job.work_mode
+    submitted["workplace_type"] = job.workplace_type or None
+    submitted["apply_url"] = job.apply_url
+    submitted["is_active"] = job.is_active
+    submitted["salary"] = job.salary or ""
+    submitted["full_description"] = job.description or ""
+    raw["source"] = "employer"
+    raw["employer_submitted"] = submitted
+    raw["body"] = job.description or ""
+    job.raw = raw
+
+    job.save()
+    return job

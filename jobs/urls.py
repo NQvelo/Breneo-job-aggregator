@@ -5,6 +5,7 @@ from .views import (
     JobDetailsView,
     CompanyDetailView,
     EmployerJobCreateView,
+    EmployerJobDetailView,
     TriggerFetchView,
 )
 
@@ -15,5 +16,6 @@ urlpatterns = [
     path('companies/<str:company_name>', CompanyDetailView.as_view(), name='company_detail'),  # /api/companies/Airbnb
     path('companies', CompanyDetailView.as_view(), name='company_detail_query'),  # /api/companies?name=Airbnb
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
+    path('employer/jobs/<int:job_id>', EmployerJobDetailView.as_view(), name='employer_job_detail'),
     path('trigger-fetch', TriggerFetchView.as_view(), name='trigger_fetch'),  # /api/trigger-fetch (for external cron)
 ]

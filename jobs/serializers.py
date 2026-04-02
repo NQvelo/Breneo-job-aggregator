@@ -217,6 +217,22 @@ class EmployerJobCreateSerializer(serializers.Serializer):
     salary = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
 
 
+class EmployerJobUpdateSerializer(serializers.Serializer):
+    """Partial update payload for employer-posted jobs."""
+
+    title = serializers.CharField(max_length=500, required=False)
+    company = serializers.CharField(max_length=200, required=False)
+    location = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    work_mode = serializers.ChoiceField(
+        choices=["remote", "hybrid", "onsite", "on-site", "unknown"],
+        required=False,
+    )
+    apply_url = serializers.URLField(required=False, allow_null=True, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
+    full_description = serializers.CharField(required=False)
+    salary = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+
 def job_to_dict(job):
     # job may be Job model instance or dict (from fetcher)
     if hasattr(job, "title"):

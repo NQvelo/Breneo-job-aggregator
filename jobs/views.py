@@ -23,9 +23,10 @@ from .serializers import (
     NestedJobSerializer,
     CompanyDetailSerializer,
     EmployerJobCreateSerializer,
+    EmployerJobUpdateSerializer,
 )
 from .permissions import CanPostEmployerJob
-from .employer_jobs import create_employer_job
+from .employer_jobs import create_employer_job, get_employer_job_or_none, update_employer_job
 
 class JobsGroupedByCompany(APIView):
     """
@@ -499,6 +500,45 @@ class EmployerJobCreateView(APIView):
         )
         out = NestedJobSerializer(job).data
         return Response(out, status=status.HTTP_201_CREATED)
+
+
+class EmployerJobDetailView(APIView):
+    """
+    Update or delete an employer-posted job.
+
+    PATCH /api/employer/jobs/<job_id>
+    DELETE /api/employer/jobs/<job_id>
+    """
+
+    authentication_classes = []
+    permission_classes = [CanPostEmployerJob]
+
+    def patch(self, request, job_id: int):
+        job = get_employer_job_or_none(job_id)
+        if not job:
+            return Response({"error": "Employer job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        ser = EmployerJobUpdateSerializer(data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        if not data:
+            return Response({"error": "No fields provided for update"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            updated = update_employer_job(job, data)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        out = NestedJobSerializer(updated).data
+        return Response(out, status=status.HTTP_200_OK)
+
+    def delete(self, request, job_id: int):
+        job = get_employer_job_or_none(job_id)
+        if not job:
+            return Response({"error": "Employer job not found"}, status=status.HTTP_404_NOT_FOUND)
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TriggerFetchView(APIView):
