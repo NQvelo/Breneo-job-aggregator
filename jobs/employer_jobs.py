@@ -91,7 +91,7 @@ def create_employer_job(
 
 
 def get_employer_job_or_none(job_id: int) -> Job | None:
-    return Job.objects.filter(id=job_id, platform="employer").select_related("company").first()
+    return Job.objects.filter(id=job_id).select_related("company").first()
 
 
 def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:

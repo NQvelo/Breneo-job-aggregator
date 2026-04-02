@@ -486,14 +486,24 @@ class EmployerJobCreateView(APIView):
 
     def get(self, request):
         """
-        Employer dashboard listing (includes active + inactive employer jobs).
-        Public/default job APIs remain active-only.
+        Employer dashboard listing (includes active + inactive jobs).
+        Filter by company, not platform:
+        - ?company_id=<id> (preferred)
+        - ?company=<exact company name>
         """
-        jobs = (
-            Job.objects.filter(platform="employer")
-            .select_related("company")
-            .order_by("-posted_at", "-fetched_at")
-        )
+        jobs = Job.objects.select_related("company")
+        company_id = request.query_params.get("company_id", "").strip()
+        company_name = request.query_params.get("company", "").strip()
+
+        if company_id:
+            try:
+                jobs = jobs.filter(company_id=int(company_id))
+            except ValueError:
+                return Response({"error": "company_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+        elif company_name:
+            jobs = jobs.filter(company__name__iexact=company_name)
+
+        jobs = jobs.order_by("-posted_at", "-fetched_at")
         serializer = NestedJobSerializer(jobs, many=True)
         return Response(serializer.data)
 
