@@ -525,21 +525,54 @@ class EmployerJobCreateView(APIView):
         return Response(out, status=status.HTTP_201_CREATED)
 
 
+def _resolve_employer_job(request, job_id: int):
+    """
+    Load job by primary key. If ?company_id= is present, require job.company_id to match.
+    Returns (job, error_tag): error_tag is None, "not_found", or "bad_request".
+    """
+    job = get_employer_job_or_none(job_id)
+    if not job:
+        return None, "not_found"
+    company_id = request.query_params.get("company_id", "").strip()
+    if company_id:
+        try:
+            if job.company_id != int(company_id):
+                return None, "not_found"
+        except ValueError:
+            return None, "bad_request"
+    return job, None
+
+
 class EmployerJobDetailView(APIView):
     """
-    Update or delete an employer-posted job.
+    Single employer job by primary key.
 
-    PATCH /api/employer/jobs/<job_id>
-    DELETE /api/employer/jobs/<job_id>
+    GET    /api/employer/jobs/<job_id>  — full nested job payload
+    PATCH  /api/employer/jobs/<job_id>  — partial update (JSON body)
+    POST   /api/employer/jobs/<job_id>  — same as PATCH (for clients that cannot send PATCH)
+    DELETE /api/employer/jobs/<job_id>  — remove job
+
+    Optional query (all methods): ?company_id=<id> to scope access to that company’s jobs.
     """
 
     authentication_classes = []
     permission_classes = [CanPostEmployerJob]
 
-    def patch(self, request, job_id: int):
-        job = get_employer_job_or_none(job_id)
-        if not job:
-            return Response({"error": "Employer job not found"}, status=status.HTTP_404_NOT_FOUND)
+    def get(self, request, job_id: int):
+        job, err = _resolve_employer_job(request, job_id)
+        if err == "bad_request":
+            return Response({"error": "company_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+        if err == "not_found" or job is None:
+            return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(NestedJobSerializer(job).data)
+
+    def _update(self, request, job_id: int):
+        job, err = _resolve_employer_job(request, job_id)
+        if err == "bad_request":
+            return Response({"error": "company_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+        if err == "not_found" or job is None:
+            return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
 
         ser = EmployerJobUpdateSerializer(data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
@@ -553,13 +586,21 @@ class EmployerJobDetailView(APIView):
         except ValueError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        out = NestedJobSerializer(updated).data
-        return Response(out, status=status.HTTP_200_OK)
+        return Response(NestedJobSerializer(updated).data, status=status.HTTP_200_OK)
+
+    def patch(self, request, job_id: int):
+        return self._update(request, job_id)
+
+    def post(self, request, job_id: int):
+        """Alias for PATCH — update job with JSON body."""
+        return self._update(request, job_id)
 
     def delete(self, request, job_id: int):
-        job = get_employer_job_or_none(job_id)
-        if not job:
-            return Response({"error": "Employer job not found"}, status=status.HTTP_404_NOT_FOUND)
+        job, err = _resolve_employer_job(request, job_id)
+        if err == "bad_request":
+            return Response({"error": "company_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+        if err == "not_found" or job is None:
+            return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
         job.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
