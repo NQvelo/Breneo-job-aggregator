@@ -94,6 +94,12 @@ def get_employer_job_or_none(job_id: int) -> Job | None:
     return Job.objects.filter(id=job_id).select_related("company").first()
 
 
+def _clean_str_list(val: Any) -> list[str]:
+    if not isinstance(val, list):
+        return []
+    return [str(x).strip() for x in val if str(x).strip()]
+
+
 def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
     company_name = payload.get("company")
     if company_name is not None:
@@ -110,12 +116,37 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
         job.title = (payload.get("title") or "").strip()
     if "location" in payload:
         job.location = (payload.get("location") or "").strip() or None
+    if "location_country" in payload:
+        lc = (payload.get("location_country") or "").strip()
+        job.location_country = lc or None
     if "apply_url" in payload:
         job.apply_url = payload.get("apply_url") or None
     if "salary" in payload:
         job.salary = (payload.get("salary") or "").strip() or None
     if "is_active" in payload:
         job.is_active = bool(payload.get("is_active"))
+    if "benefits" in payload:
+        job.benefits = (payload.get("benefits") or "").strip() or None
+    if "responsibilities" in payload:
+        job.responsibilities = (payload.get("responsibilities") or "").strip() or None
+    if "qualifications" in payload:
+        job.qualifications = (payload.get("qualifications") or "").strip() or None
+    if "industry_tags" in payload:
+        job.industry_tags = (payload.get("industry_tags") or "").strip() or None
+    if "posted_at" in payload:
+        job.posted_at = payload.get("posted_at")
+    if "skills_required" in payload:
+        job.skills_required = _clean_str_list(payload.get("skills_required"))
+    if "skills_preferred" in payload:
+        job.skills_preferred = _clean_str_list(payload.get("skills_preferred"))
+    if "seniority" in payload:
+        job.seniority = payload.get("seniority") or "unknown"
+    if "min_years_experience" in payload:
+        job.min_years_experience = payload.get("min_years_experience")
+    if "visa_sponsorship" in payload:
+        job.visa_sponsorship = payload.get("visa_sponsorship") or "unknown"
+    if "work_authorization_required" in payload:
+        job.work_authorization_required = payload.get("work_authorization_required") or "unknown"
 
     wm = None
     wt_display = None
@@ -124,22 +155,42 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
         job.work_mode = wm
         if wt_display:
             job.workplace_type = wt_display
+    if "workplace_type" in payload and "work_mode" not in payload:
+        wt = (payload.get("workplace_type") or "").strip()
+        job.workplace_type = wt or None
 
+    # Main description: full_description takes precedence over alias `description`
+    body_text = None
     if "full_description" in payload:
-        full_description = (payload.get("full_description") or "").strip()
-        job.description = full_description
+        body_text = (payload.get("full_description") or "").strip()
+    elif "description" in payload:
+        body_text = (payload.get("description") or "").strip()
+    if body_text is not None:
+        job.description = body_text
 
     raw = job.raw if isinstance(job.raw, dict) else {}
     submitted = raw.get("employer_submitted") if isinstance(raw.get("employer_submitted"), dict) else {}
     submitted["title"] = job.title
     submitted["company"] = job.company.name
     submitted["location"] = job.location or ""
+    submitted["location_country"] = job.location_country or ""
     submitted["work_mode"] = wm or job.work_mode
     submitted["workplace_type"] = job.workplace_type or None
     submitted["apply_url"] = job.apply_url
     submitted["is_active"] = job.is_active
     submitted["salary"] = job.salary or ""
     submitted["full_description"] = job.description or ""
+    submitted["benefits"] = job.benefits or ""
+    submitted["responsibilities"] = job.responsibilities or ""
+    submitted["qualifications"] = job.qualifications or ""
+    submitted["industry_tags"] = job.industry_tags or ""
+    submitted["posted_at"] = job.posted_at.isoformat() if job.posted_at else None
+    submitted["skills_required"] = job.skills_required or []
+    submitted["skills_preferred"] = job.skills_preferred or []
+    submitted["seniority"] = job.seniority
+    submitted["min_years_experience"] = job.min_years_experience
+    submitted["visa_sponsorship"] = job.visa_sponsorship
+    submitted["work_authorization_required"] = job.work_authorization_required
     raw["source"] = "employer"
     raw["employer_submitted"] = submitted
     raw["body"] = job.description or ""

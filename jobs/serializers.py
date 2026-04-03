@@ -1,6 +1,6 @@
 
 from rest_framework import serializers
-from .models import Job, Company
+from .models import Job, Company, SENIORITY_CHOICES, VISA_SPONSORSHIP_CHOICES, WORK_AUTH_CHOICES
 from datetime import datetime
 
 class DynamicFieldsModelSerializer(serializers.ModelSerializer):
@@ -218,19 +218,49 @@ class EmployerJobCreateSerializer(serializers.Serializer):
 
 
 class EmployerJobUpdateSerializer(serializers.Serializer):
-    """Partial update payload for employer-posted jobs."""
+    """Partial update: all employer-editable job fields (PATCH/POST body)."""
 
     title = serializers.CharField(max_length=500, required=False)
     company = serializers.CharField(max_length=200, required=False)
     location = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    location_country = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    workplace_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
     work_mode = serializers.ChoiceField(
         choices=["remote", "hybrid", "onsite", "on-site", "unknown"],
         required=False,
     )
     apply_url = serializers.URLField(required=False, allow_null=True, allow_blank=True)
     is_active = serializers.BooleanField(required=False)
-    full_description = serializers.CharField(required=False)
+    # Main body text (same as create). Alias `description` for API ergonomics.
+    full_description = serializers.CharField(required=False, allow_blank=True)
+    description = serializers.CharField(required=False, allow_blank=True)
     salary = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    benefits = serializers.CharField(required=False, allow_blank=True)
+    responsibilities = serializers.CharField(required=False, allow_blank=True)
+    qualifications = serializers.CharField(required=False, allow_blank=True)
+    industry_tags = serializers.CharField(required=False, allow_blank=True)
+    posted_at = serializers.DateTimeField(required=False, allow_null=True)
+    skills_required = serializers.ListField(
+        child=serializers.CharField(max_length=200, allow_blank=True),
+        required=False,
+    )
+    skills_preferred = serializers.ListField(
+        child=serializers.CharField(max_length=200, allow_blank=True),
+        required=False,
+    )
+    seniority = serializers.ChoiceField(
+        choices=[c[0] for c in SENIORITY_CHOICES],
+        required=False,
+    )
+    min_years_experience = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    visa_sponsorship = serializers.ChoiceField(
+        choices=[c[0] for c in VISA_SPONSORSHIP_CHOICES],
+        required=False,
+    )
+    work_authorization_required = serializers.ChoiceField(
+        choices=[c[0] for c in WORK_AUTH_CHOICES],
+        required=False,
+    )
 
 
 def job_to_dict(job):
