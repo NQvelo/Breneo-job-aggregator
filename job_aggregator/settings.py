@@ -1,5 +1,9 @@
 import os
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 # ---------------------------
 # BASE DIRECTORY
@@ -113,15 +117,56 @@ TEMPLATES = [
 # DATABASE
 # ---------------------------
 # Railway Postgres often sets DATABASE_URL (host *.railway.internal, in-VPC only) and
-# DATABASE_PUBLIC_URL (internet-reachable). Local `railway shell` / `railway run` injects
-# the same vars but private DNS does not resolve off-platform → OperationalError.
-# When not running inside a container, prefer PUBLIC if private is Railway-internal.
+# DATABASE_PUBLIC_URL (public proxy). Local `railway shell` uses the same DATABASE_URL;
+# private DNS usually does not resolve on your laptop. We detect that with getaddrinfo and
+# switch to DATABASE_PUBLIC_URL when needed (deployed containers resolve internal DNS).
+
+
+def _database_hostname(url: str) -> str | None:
+    try:
+        return urlparse(url).hostname
+    except Exception:
+        return None
+
+
+def _railway_internal_db_resolves(url: str) -> bool:
+    """True if the DB host in url resolves (e.g. on Railway’s network)."""
+    host = _database_hostname(url)
+    if not host or "railway.internal" not in host:
+        return True
+    port = urlparse(url).port or 5432
+    try:
+        socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    return True
+
+
 _private_db = (os.environ.get("DATABASE_URL") or "").strip()
 _public_db = (os.environ.get("DATABASE_PUBLIC_URL") or "").strip()
-_in_container = os.path.exists("/.dockerenv")
+if not _public_db:
+    _public_db = (os.environ.get("RAILWAY_DATABASE_PUBLIC_URL") or "").strip()
 
-if _private_db and _public_db and "railway.internal" in _private_db and not _in_container:
+_internal_unresolvable = (
+    _private_db
+    and "railway.internal" in _private_db
+    and not _railway_internal_db_resolves(_private_db)
+)
+
+if _internal_unresolvable and _public_db:
     DATABASE_URL = _public_db
+elif _internal_unresolvable and not _public_db:
+    raise ImproperlyConfigured(
+        "DATABASE_URL uses *.railway.internal, which does not resolve on this machine, and "
+        "DATABASE_PUBLIC_URL is not set.\n\n"
+        "Fix (pick one):\n"
+        "  • Railway → Postgres service → Variables → reference DATABASE_PUBLIC_URL on your "
+        "web service (same variable name), then run migrate again.\n"
+        "  • Or run: export DATABASE_URL=\"$DATABASE_PUBLIC_URL\" after copying the public "
+        "URL from the Postgres service.\n"
+        "  • Or run migrations from Railway dashboard → your web service → Shell (inside "
+        "Railway, internal DNS works)."
+    )
 elif _private_db:
     DATABASE_URL = _private_db
 else:
