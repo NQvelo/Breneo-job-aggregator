@@ -33,8 +33,44 @@ WORK_AUTH_CHOICES = [
 ]
 
 
+class Industry(models.Model):
+    """Canonical industry list for companies (managed in admin or via API)."""
+
+    name = models.CharField(max_length=200, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name_plural = "Industries"
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Company(models.Model):
     name = models.CharField(max_length=200, unique=True)
+
+    industries = models.ManyToManyField(
+        Industry,
+        blank=True,
+        related_name="companies",
+        help_text="One or more industries (selectable)",
+    )
+
+    # Primary contact email (e.g. employer registration in breneo-api)
+    company_email = models.EmailField(
+        blank=True,
+        null=True,
+        help_text="Company contact email",
+    )
+
+    # External user IDs from breneo-api (strings — UUIDs or numeric ids as stored there)
+    staff_user_ids = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Breneo-api user IDs allowed to manage this company (list of strings)",
+    )
 
     # Optional domain (useful for enrichment / logo fetching)
     domain = models.CharField(max_length=200, blank=True, null=True)

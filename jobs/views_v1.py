@@ -39,7 +39,9 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for viewing job listings.
     """
-    queryset = Job.objects.filter(is_active=True).select_related('company')
+    queryset = Job.objects.filter(is_active=True).select_related("company").prefetch_related(
+        "company__industries"
+    )
     serializer_class = NestedJobSerializer
     pagination_class = CustomPagination
 

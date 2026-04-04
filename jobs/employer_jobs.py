@@ -91,7 +91,12 @@ def create_employer_job(
 
 
 def get_employer_job_or_none(job_id: int) -> Job | None:
-    return Job.objects.filter(id=job_id).select_related("company").first()
+    return (
+        Job.objects.filter(id=job_id)
+        .select_related("company")
+        .prefetch_related("company__industries")
+        .first()
+    )
 
 
 def _clean_str_list(val: Any) -> list[str]:

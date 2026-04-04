@@ -1,6 +1,13 @@
 
 from rest_framework import serializers
-from .models import Job, Company, SENIORITY_CHOICES, VISA_SPONSORSHIP_CHOICES, WORK_AUTH_CHOICES
+from .models import (
+    Job,
+    Company,
+    Industry,
+    SENIORITY_CHOICES,
+    VISA_SPONSORSHIP_CHOICES,
+    WORK_AUTH_CHOICES,
+)
 from datetime import datetime
 
 class DynamicFieldsModelSerializer(serializers.ModelSerializer):
@@ -58,15 +65,23 @@ class JobSerializer(DynamicFieldsModelSerializer):
         return None
 
 
+class IndustrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Industry
+        fields = ["id", "name"]
+
+
 class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     """Serializer for company information nested within job responses"""
     logo = serializers.SerializerMethodField()
-    
+    industries = IndustrySerializer(many=True, read_only=True)
+
     class Meta:
         model = Company
         fields = [
             'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
+            'industries', 'company_email', 'staff_user_ids',
         ]
         read_only_fields = ['id']
     
@@ -125,12 +140,14 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     """Serializer for company details with all fields"""
     logo = serializers.SerializerMethodField()
     job_count = serializers.SerializerMethodField()
-    
+    industries = IndustrySerializer(many=True, read_only=True)
+
     class Meta:
         model = Company
         fields = [
             'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
+            'industries', 'company_email', 'staff_user_ids',
             'created_at', 'updated_at', 'job_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -173,10 +190,11 @@ class CompanyJobsSerializer(serializers.ModelSerializer):
     jobs = serializers.SerializerMethodField()
     domain = serializers.CharField(allow_blank=True, allow_null=True)
     logo = serializers.SerializerMethodField()
-    
+    industries = IndustrySerializer(many=True, read_only=True)
+
     class Meta:
         model = Company
-        fields = ['id', 'name', 'domain', 'logo', 'platform', 'jobs']
+        fields = ["id", "name", "domain", "logo", "platform", "industries", "jobs"]
     
     def get_logo(self, obj):
         """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
@@ -261,6 +279,80 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
         choices=[c[0] for c in WORK_AUTH_CHOICES],
         required=False,
     )
+
+
+class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
+    """Create/update company via employer API (breneo-api syncs staff_user_ids, etc.)."""
+
+    industry_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        write_only=True,
+    )
+    industry_names = serializers.ListField(
+        child=serializers.CharField(max_length=200),
+        required=False,
+        write_only=True,
+    )
+
+    class Meta:
+        model = Company
+        fields = [
+            "name",
+            "domain",
+            "logo",
+            "platform",
+            "description",
+            "website",
+            "founded_date",
+            "employees_count",
+            "social_links",
+            "additional_details",
+            "company_email",
+            "staff_user_ids",
+            "industry_ids",
+            "industry_names",
+        ]
+
+    def validate_staff_user_ids(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("staff_user_ids must be a list of strings.")
+        return [str(x).strip() for x in value if str(x).strip()]
+
+    @staticmethod
+    def _apply_industries(company: Company, ids: list[int] | None, names: list[str] | None) -> None:
+        pks: set[int] = set()
+        if ids is not None:
+            pks.update(ids)
+        if names:
+            for n in names:
+                n = (n or "").strip()
+                if n:
+                    obj, _ = Industry.objects.get_or_create(name=n)
+                    pks.add(obj.pk)
+        company.industries.set(Industry.objects.filter(pk__in=pks))
+
+    def create(self, validated_data):
+        industry_ids = validated_data.pop("industry_ids", None)
+        industry_names = validated_data.pop("industry_names", None)
+        if not validated_data.get("name"):
+            raise serializers.ValidationError({"name": "This field is required."})
+        company = Company.objects.create(**validated_data)
+        if industry_ids is not None or industry_names is not None:
+            self._apply_industries(company, industry_ids, industry_names)
+        return company
+
+    def update(self, instance, validated_data):
+        industry_ids = validated_data.pop("industry_ids", serializers.empty)
+        industry_names = validated_data.pop("industry_names", serializers.empty)
+        company = super().update(instance, validated_data)
+        if "industry_ids" in self.initial_data or "industry_names" in self.initial_data:
+            ids = None if industry_ids is serializers.empty else industry_ids
+            names = None if industry_names is serializers.empty else industry_names
+            self._apply_industries(company, ids, names)
+        return company
 
 
 def job_to_dict(job):

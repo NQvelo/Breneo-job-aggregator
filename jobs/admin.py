@@ -1,17 +1,24 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Job, Company
+from .models import Job, Company, Industry
+
+
+@admin.register(Industry)
+class IndustryAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_at")
+    search_fields = ("name",)
 
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ("name", "logo_display", "website", "platform", "employees_count", "founded_date", "job_count")
+    list_display = ("name", "industries_list", "company_email", "logo_display", "website", "platform", "employees_count", "founded_date", "job_count")
     list_filter = ("platform",)
-    search_fields = ("name", "domain", "website", "description")
+    search_fields = ("name", "domain", "website", "description", "company_email")
+    filter_horizontal = ("industries",)
     readonly_fields = ("created_at", "updated_at", "logo_display", "job_count")
     fieldsets = (
         ("Basic Information", {
-            "fields": ("name", "domain", "platform", "logo", "logo_display")
+            "fields": ("name", "domain", "platform", "industries", "company_email", "staff_user_ids", "logo", "logo_display")
         }),
         ("Company Details", {
             "fields": ("description", "website", "founded_date", "employees_count")
@@ -26,6 +33,11 @@ class CompanyAdmin(admin.ModelAdmin):
         }),
     )
     ordering = ("name",)
+
+    def industries_list(self, obj):
+        return ", ".join(obj.industries.values_list("name", flat=True)) or "-"
+
+    industries_list.short_description = "Industries"
 
     def logo_display(self, obj):
         """Display company logo as image in admin"""

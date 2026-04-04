@@ -36,9 +36,14 @@ class JobsGroupedByCompany(APIView):
 
     def get(self, request):
         # Prefetch only active jobs and filter companies that have at least one active job
-        companies = Company.objects.prefetch_related(
-            Prefetch('jobs', queryset=Job.objects.filter(is_active=True))
-        ).filter(jobs__is_active=True).distinct()
+        companies = (
+            Company.objects.prefetch_related(
+                Prefetch("jobs", queryset=Job.objects.filter(is_active=True)),
+                "industries",
+            )
+            .filter(jobs__is_active=True)
+            .distinct()
+        )
         serializer = CompanyJobsSerializer(companies, many=True)
         return Response(serializer.data)
 
@@ -150,7 +155,9 @@ class JobSearchView(APIView):
             limit = num_pages
         
         # Start with active jobs only, prefetch company for better performance
-        jobs = Job.objects.filter(is_active=True).select_related('company')
+        jobs = Job.objects.filter(is_active=True).select_related("company").prefetch_related(
+            "company__industries"
+        )
         
         # Apply title filter using NLP parser
         title_q_filter = Q()
@@ -438,19 +445,32 @@ class JobDetailsView(APIView):
         
         # Try to find job by primary key first
         try:
-            job = Job.objects.select_related('company').get(id=int(job_id))
+            job = (
+                Job.objects.select_related("company")
+                .prefetch_related("company__industries")
+                .get(id=int(job_id))
+            )
         except (ValueError, Job.DoesNotExist):
             # If not found by primary key, try external_job_id
             try:
                 # Try exact match on external_job_id
-                job = Job.objects.select_related('company').get(external_job_id=job_id)
+                job = (
+                    Job.objects.select_related("company")
+                    .prefetch_related("company__industries")
+                    .get(external_job_id=job_id)
+                )
             except Job.DoesNotExist:
                 # Try with platform if job_id contains platform info
                 # Or try case-insensitive match
-                job = Job.objects.select_related('company').filter(
-                    Q(external_job_id__iexact=job_id) |
-                    Q(external_job_id__icontains=job_id)
-                ).first()
+                job = (
+                    Job.objects.select_related("company")
+                    .prefetch_related("company__industries")
+                    .filter(
+                        Q(external_job_id__iexact=job_id)
+                        | Q(external_job_id__icontains=job_id)
+                    )
+                    .first()
+                )
                 
                 if not job:
                     return Response(
@@ -491,7 +511,7 @@ class EmployerJobCreateView(APIView):
         - ?company_id=<id> (preferred)
         - ?company=<exact company name>
         """
-        jobs = Job.objects.select_related("company")
+        jobs = Job.objects.select_related("company").prefetch_related("company__industries")
         company_id = request.query_params.get("company_id", "").strip()
         company_name = request.query_params.get("company", "").strip()
 
