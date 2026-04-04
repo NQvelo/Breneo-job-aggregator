@@ -37,12 +37,16 @@ urlpatterns = [
     ),
     path('employer/companies/for-user', EmployerCompanyForUserView.as_view(), name='employer_company_for_user'),
     path(
-        'employer/companies/<int:company_id>/members',
+        'employer/companies/<path:company_name>/members',
         EmployerCompanyMemberView.as_view(),
         name='employer_company_members',
     ),
     path('employer/companies', EmployerCompanyListCreateView.as_view(), name='employer_company_list_create'),
-    path('employer/companies/<int:company_id>', EmployerCompanyDetailView.as_view(), name='employer_company_detail'),
+    path(
+        'employer/companies/<path:company_name>',
+        EmployerCompanyDetailView.as_view(),
+        name='employer_company_detail',
+    ),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
     path('employer/jobs/<int:job_id>', EmployerJobDetailView.as_view(), name='employer_job_detail'),
     path('trigger-fetch', TriggerFetchView.as_view(), name='trigger_fetch'),  # /api/trigger-fetch (for external cron)

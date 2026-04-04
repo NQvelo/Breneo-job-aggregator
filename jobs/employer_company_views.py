@@ -1,5 +1,7 @@
 """Employer-facing company + industry API (synced with breneo-api user ids)."""
 
+from urllib.parse import unquote
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -51,6 +53,17 @@ def _company_queryset_base():
         "industries",
         "staff_memberships",
     ).order_by("name")
+
+
+def _company_from_path_segment(company_name: str) -> Company | None:
+    """
+    Resolve employer URL path segment to a Company. `name` is unique on the model.
+    Path is URL-decoded (e.g. %20 → space). Match is case-insensitive.
+    """
+    raw = unquote((company_name or "").strip())
+    if not raw:
+        return None
+    return Company.objects.filter(name__iexact=raw).first()
 
 
 class EmployerStaffMembershipListCreateView(APIView):
@@ -170,8 +183,9 @@ class EmployerCompanyMemberView(APIView):
     """
     Convenience attach / detach by company + user (same rows as staff-memberships).
 
-    POST   /api/employer/companies/<company_id>/members  JSON {"external_user_id": "..."}
-    DELETE /api/employer/companies/<company_id>/members?external_user_id=...
+    POST   /api/employer/companies/<company_name>/members  JSON {"external_user_id": "..."}
+    DELETE /api/employer/companies/<company_name>/members?external_user_id=...
+    company_name: URL-encoded company name (unique). Response bodies still include company "id".
     Body key staff_user_id is accepted as an alias for external_user_id.
     """
 
@@ -193,10 +207,9 @@ class EmployerCompanyMemberView(APIView):
             )
         return uid, None
 
-    def post(self, request, company_id: int):
-        try:
-            company = Company.objects.get(pk=company_id)
-        except Company.DoesNotExist:
+    def post(self, request, company_name: str):
+        company = _company_from_path_segment(company_name)
+        if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
         uid, err = self._parse_external_user_id(request.data, request.query_params)
@@ -211,10 +224,9 @@ class EmployerCompanyMemberView(APIView):
         ).data
         return Response(out, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
-    def delete(self, request, company_id: int):
-        try:
-            company = Company.objects.get(pk=company_id)
-        except Company.DoesNotExist:
+    def delete(self, request, company_name: str):
+        company = _company_from_path_segment(company_name)
+        if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
         uid, err = self._parse_external_user_id(request.data, request.query_params)
@@ -231,7 +243,7 @@ class EmployerCompanyMemberView(APIView):
 
 class EmployerCompanyListCreateView(APIView):
     """
-    GET  /api/employer/companies — all companies (picker); optional filter by user.
+    GET  /api/employer/companies — all companies (picker); optional ?search= (name icontains);
          ?external_user_id= or ?staff_user_id= — only companies that include this user
     POST /api/employer/companies — create company
     """
@@ -244,6 +256,9 @@ class EmployerCompanyListCreateView(APIView):
         uid = _external_user_id_from_request(request)
         if uid:
             qs = qs.filter(staff_memberships__external_user_id=uid).distinct()
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(name__icontains=search)
         return Response(CompanyDetailSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -259,30 +274,37 @@ class EmployerCompanyListCreateView(APIView):
 
 class EmployerCompanyDetailView(APIView):
     """
-    GET   /api/employer/companies/<company_id>
-    PUT   /api/employer/companies/<company_id>  — full update (all writable fields)
-    PATCH /api/employer/companies/<company_id>
+    GET   /api/employer/companies/<company_name>
+    PUT   /api/employer/companies/<company_name>  — full update (all writable fields)
+    PATCH /api/employer/companies/<company_name>
+    company_name: URL-encoded unique name (not numeric id). JSON still includes "id".
     Optional: ?staff_user_id= or ?external_user_id= for access check.
     """
 
     authentication_classes = []
     permission_classes = [CanPostEmployerJob]
 
-    def get(self, request, company_id: int):
-        try:
-            company = _company_queryset_base().get(pk=company_id)
-        except Company.DoesNotExist:
+    def _get_company(self, company_name: str) -> Company | None:
+        c = _company_from_path_segment(company_name)
+        if not c:
+            return None
+        return (
+            Company.objects.prefetch_related("industries", "staff_memberships")
+            .filter(pk=c.pk)
+            .first()
+        )
+
+    def get(self, request, company_name: str):
+        company = self._get_company(company_name)
+        if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(CompanyDetailSerializer(company).data)
 
-    def put(self, request, company_id: int):
-        try:
-            company = Company.objects.prefetch_related("industries", "staff_memberships").get(
-                pk=company_id
-            )
-        except Company.DoesNotExist:
+    def put(self, request, company_name: str):
+        company = self._get_company(company_name)
+        if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -295,12 +317,9 @@ class EmployerCompanyDetailView(APIView):
         )
         return Response(CompanyDetailSerializer(updated).data)
 
-    def patch(self, request, company_id: int):
-        try:
-            company = Company.objects.prefetch_related("industries", "staff_memberships").get(
-                pk=company_id
-            )
-        except Company.DoesNotExist:
+    def patch(self, request, company_name: str):
+        company = self._get_company(company_name)
+        if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)

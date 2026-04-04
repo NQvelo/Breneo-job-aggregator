@@ -1,0 +1,43 @@
+You are implementing the employer dashboard and flows only (not job seeker search, public job listings, or marketing pages). Integrate with the job-aggregator Django REST API under /api/employer/ only.
+
+AUTH (employer)
+- Never expose the employer secret in the browser. Call the aggregator from Breneo-api server-side (BFF / Route Handlers / server actions) and set header: X-Employer-Key: <EMPLOYER_POST_SECRET from the aggregator env>.
+- Alternative: user is logged into the aggregator with Django group "Employer" (session); uncommon for Breneo; prefer BFF + X-Employer-Key.
+- Base URL: https://<aggregator-host>/api/employer/
+
+IDENTITY
+- Use the Breneo logged-in user id as external_user_id (string) in queries and bodies. Alias staff_user_id is accepted in query params and some bodies where noted.
+
+COMPANIES
+- Paths use the company’s unique name (URL-encoded), not the numeric id. Every company JSON still includes "id" for jobs and staff-memberships.
+- GET companies — list (company picker). Optional ?search= substring match on name. Optional ?external_user_id= or ?staff_user_id= to filter to companies where that user is staff.
+- GET companies/for-user?external_user_id=<id> — “my companies” (param required; staff_user_id alias).
+- GET companies/<url-encoded-name> — detail (match is case-insensitive). Optional ?external_user_id= for scoped access.
+- POST companies — create. Body: name (required); optional domain, logo, platform, description, website, founded_date, employees_count, social_links, additional_details, company_email, industry_ids[], industry_names[]. Do not send staff_user_ids; use staff-memberships.
+- PATCH companies/<url-encoded-name> — partial update (if name changes, use the new name in subsequent URLs).
+- PUT companies/<url-encoded-name> — full update.
+
+STAFF MEMBERSHIPS (Breneo user ↔ company)
+- Company JSON includes read-only staff_user_ids: string[] (computed). Source of truth: staff-memberships.
+- GET staff-memberships — optional ?company_id= (integer id), ?external_user_id= (or staff_user_id).
+- POST staff-memberships — body { "company_id": number, "external_user_id": string }.
+- GET|PATCH|PUT|DELETE staff-memberships/<membershipId>
+- Shortcut: POST companies/<url-encoded-name>/members body { "external_user_id": "..." }; DELETE companies/<url-encoded-name>/members?external_user_id=...
+
+JOBS (employer)
+- GET jobs?company_id=<integer id> — dashboard list for that company (use id from company JSON).
+- POST jobs — create (title, company name, work_mode, full_description, etc.; follow backend contract).
+- PATCH jobs/<jobId> — update.
+
+FLOWS
+1) After Breneo login, read current user id → external_user_id for aggregator calls.
+2) Onboarding: GET companies?search=… (picker) → confirm → POST staff-memberships or POST companies/<encoded-name>/members.
+3) Home context: GET companies/for-user?external_user_id=... → user picks active company (keep id for jobs API; use encoded name for company detail URLs).
+4) Scoped company GET/PATCH/PUT: append ?external_user_id=... when acting as that user.
+
+ERRORS
+- 403: bad/missing X-Employer-Key or not in Employer group.
+- 400: missing required query/body.
+- 404: bad id or forbidden scoped access (may look like “not found”).
+
+Use snake_case types matching JSON. Keep the HTTP client on the server only (BFF), not in public client bundles.
