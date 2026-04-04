@@ -65,13 +65,6 @@ class Company(models.Model):
         help_text="Company contact email",
     )
 
-    # External user IDs from breneo-api (strings — UUIDs or numeric ids as stored there)
-    staff_user_ids = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="Breneo-api user IDs allowed to manage this company (list of strings)",
-    )
-
     # Optional domain (useful for enrichment / logo fetching)
     domain = models.CharField(max_length=200, blank=True, null=True)
 
@@ -133,6 +126,34 @@ class Company(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CompanyStaffMembership(models.Model):
+    """Links a breneo-api user id (`external_user_id`) to a company for employer access."""
+
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="staff_memberships",
+    )
+    external_user_id = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="User id from breneo-api (string)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "external_user_id"],
+                name="uniq_company_staff_external_user",
+            )
+        ]
+        ordering = ["company_id", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.company_id}:{self.external_user_id}"
 
 
 class Job(models.Model):

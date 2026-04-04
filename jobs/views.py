@@ -156,7 +156,8 @@ class JobSearchView(APIView):
         
         # Start with active jobs only, prefetch company for better performance
         jobs = Job.objects.filter(is_active=True).select_related("company").prefetch_related(
-            "company__industries"
+            "company__industries",
+            "company__staff_memberships",
         )
         
         # Apply title filter using NLP parser
@@ -447,7 +448,7 @@ class JobDetailsView(APIView):
         try:
             job = (
                 Job.objects.select_related("company")
-                .prefetch_related("company__industries")
+                .prefetch_related("company__industries", "company__staff_memberships")
                 .get(id=int(job_id))
             )
         except (ValueError, Job.DoesNotExist):
@@ -456,7 +457,7 @@ class JobDetailsView(APIView):
                 # Try exact match on external_job_id
                 job = (
                     Job.objects.select_related("company")
-                    .prefetch_related("company__industries")
+                    .prefetch_related("company__industries", "company__staff_memberships")
                     .get(external_job_id=job_id)
                 )
             except Job.DoesNotExist:
@@ -464,7 +465,7 @@ class JobDetailsView(APIView):
                 # Or try case-insensitive match
                 job = (
                     Job.objects.select_related("company")
-                    .prefetch_related("company__industries")
+                    .prefetch_related("company__industries", "company__staff_memberships")
                     .filter(
                         Q(external_job_id__iexact=job_id)
                         | Q(external_job_id__icontains=job_id)
@@ -511,7 +512,10 @@ class EmployerJobCreateView(APIView):
         - ?company_id=<id> (preferred)
         - ?company=<exact company name>
         """
-        jobs = Job.objects.select_related("company").prefetch_related("company__industries")
+        jobs = Job.objects.select_related("company").prefetch_related(
+            "company__industries",
+            "company__staff_memberships",
+        )
         company_id = request.query_params.get("company_id", "").strip()
         company_name = request.query_params.get("company", "").strip()
 

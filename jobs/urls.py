@@ -10,8 +10,12 @@ from .views import (
 )
 from .employer_company_views import (
     IndustryListView,
+    EmployerCompanyForUserView,
     EmployerCompanyListCreateView,
     EmployerCompanyDetailView,
+    EmployerCompanyMemberView,
+    EmployerStaffMembershipListCreateView,
+    EmployerStaffMembershipDetailView,
 )
 
 urlpatterns = [
@@ -21,6 +25,22 @@ urlpatterns = [
     path('industries/', IndustryListView.as_view(), name='industry_list'),
     path('companies/<str:company_name>', CompanyDetailView.as_view(), name='company_detail'),  # /api/companies/Airbnb
     path('companies', CompanyDetailView.as_view(), name='company_detail_query'),  # /api/companies?name=Airbnb
+    path(
+        'employer/staff-memberships',
+        EmployerStaffMembershipListCreateView.as_view(),
+        name='employer_staff_membership_list_create',
+    ),
+    path(
+        'employer/staff-memberships/<int:membership_id>',
+        EmployerStaffMembershipDetailView.as_view(),
+        name='employer_staff_membership_detail',
+    ),
+    path('employer/companies/for-user', EmployerCompanyForUserView.as_view(), name='employer_company_for_user'),
+    path(
+        'employer/companies/<int:company_id>/members',
+        EmployerCompanyMemberView.as_view(),
+        name='employer_company_members',
+    ),
     path('employer/companies', EmployerCompanyListCreateView.as_view(), name='employer_company_list_create'),
     path('employer/companies/<int:company_id>', EmployerCompanyDetailView.as_view(), name='employer_company_detail'),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),

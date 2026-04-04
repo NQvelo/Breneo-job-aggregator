@@ -1,6 +1,14 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Job, Company, Industry
+from .models import Job, Company, CompanyStaffMembership, Industry
+
+
+@admin.register(CompanyStaffMembership)
+class CompanyStaffMembershipAdmin(admin.ModelAdmin):
+    list_display = ("company", "external_user_id", "created_at")
+    list_select_related = ("company",)
+    search_fields = ("external_user_id", "company__name")
+    autocomplete_fields = ("company",)
 
 
 @admin.register(Industry)
@@ -18,7 +26,7 @@ class CompanyAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at", "logo_display", "job_count")
     fieldsets = (
         ("Basic Information", {
-            "fields": ("name", "domain", "platform", "industries", "company_email", "staff_user_ids", "logo", "logo_display")
+            "fields": ("name", "domain", "platform", "industries", "company_email", "logo", "logo_display")
         }),
         ("Company Details", {
             "fields": ("description", "website", "founded_date", "employees_count")

@@ -3,12 +3,24 @@ from rest_framework import serializers
 from .models import (
     Job,
     Company,
+    CompanyStaffMembership,
     Industry,
     SENIORITY_CHOICES,
     VISA_SPONSORSHIP_CHOICES,
     WORK_AUTH_CHOICES,
 )
 from datetime import datetime
+
+
+def company_staff_user_ids_for_api(company: Company) -> list[str]:
+    """Breneo user ids for this company (from CompanyStaffMembership)."""
+    cache = getattr(company, "_prefetched_objects_cache", None)
+    if cache and "staff_memberships" in cache:
+        return sorted({m.external_user_id for m in company.staff_memberships.all()})
+    return list(
+        company.staff_memberships.order_by("id").values_list("external_user_id", flat=True)
+    )
+
 
 class DynamicFieldsModelSerializer(serializers.ModelSerializer):
     """
@@ -71,10 +83,44 @@ class IndustrySerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
+class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
+    """Employer API: CRUD for company ↔ breneo user links."""
+
+    company_id = serializers.PrimaryKeyRelatedField(
+        source="company",
+        queryset=Company.objects.all(),
+    )
+
+    class Meta:
+        model = CompanyStaffMembership
+        fields = ["id", "company_id", "external_user_id", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_external_user_id(self, value: str) -> str:
+        v = (value or "").strip()
+        if not v:
+            raise serializers.ValidationError("This field may not be blank.")
+        return v
+
+    def validate(self, attrs):
+        company = attrs.get("company", getattr(self.instance, "company", None))
+        ext = attrs.get("external_user_id", getattr(self.instance, "external_user_id", None))
+        if company is not None and ext is not None:
+            qs = CompanyStaffMembership.objects.filter(company=company, external_user_id=ext)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"non_field_errors": ["This company already has this external_user_id."]}
+                )
+        return attrs
+
+
 class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     """Serializer for company information nested within job responses"""
     logo = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
+    staff_user_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
@@ -84,6 +130,9 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
             'industries', 'company_email', 'staff_user_ids',
         ]
         read_only_fields = ['id']
+
+    def get_staff_user_ids(self, obj):
+        return company_staff_user_ids_for_api(obj)
     
     def get_logo(self, obj):
         """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
@@ -141,6 +190,7 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     logo = serializers.SerializerMethodField()
     job_count = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
+    staff_user_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
@@ -151,6 +201,9 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
             'created_at', 'updated_at', 'job_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_staff_user_ids(self, obj):
+        return company_staff_user_ids_for_api(obj)
     
     def get_logo(self, obj):
         """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
@@ -282,7 +335,7 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
 
 
 class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
-    """Create/update company via employer API (breneo-api syncs staff_user_ids, etc.)."""
+    """Create/update company via employer API. Staff links: POST/PATCH /api/employer/staff-memberships/."""
 
     industry_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
@@ -309,17 +362,9 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
             "social_links",
             "additional_details",
             "company_email",
-            "staff_user_ids",
             "industry_ids",
             "industry_names",
         ]
-
-    def validate_staff_user_ids(self, value):
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise serializers.ValidationError("staff_user_ids must be a list of strings.")
-        return [str(x).strip() for x in value if str(x).strip()]
 
     @staticmethod
     def _apply_industries(company: Company, ids: list[int] | None, names: list[str] | None) -> None:

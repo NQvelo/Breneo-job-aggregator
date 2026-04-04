@@ -94,7 +94,7 @@ def get_employer_job_or_none(job_id: int) -> Job | None:
     return (
         Job.objects.filter(id=job_id)
         .select_related("company")
-        .prefetch_related("company__industries")
+        .prefetch_related("company__industries", "company__staff_memberships")
         .first()
     )
 

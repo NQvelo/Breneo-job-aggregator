@@ -1,0 +1,135 @@
+{
+  "info": {
+    "name": "Breneo Job Aggregator — Employer API",
+    "description": "Set collection variables: baseUrl, employerKey (same as Railway EMPLOYER_POST_SECRET).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://breneo-job-aggregator.up.railway.app" },
+    { "key": "employerKey", "value": "PASTE_YOUR_EMPLOYER_POST_SECRET_HERE" },
+    { "key": "companyId", "value": "18" },
+    { "key": "breneoUserId", "value": "your-breneo-user-id-string" },
+    { "key": "membershipId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Industries — list (public)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/industries/"
+      }
+    },
+    {
+      "name": "Employer — create company",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Employer-Key", "value": "{{employerKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Acme Test Co\",\n  \"company_email\": \"hr@acme.test\",\n  \"industry_ids\": [1],\n  \"industry_names\": [\"Custom Industry\"],\n  \"domain\": \"acme.test\",\n  \"description\": \"Short company description.\",\n  \"website\": \"https://acme.test\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/employer/companies"
+      }
+    },
+    {
+      "name": "Employer — list companies (by staff user)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/employer/companies?staff_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "employer", "companies"],
+          "query": [{ "key": "staff_user_id", "value": "{{breneoUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "Employer — get company by id",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/employer/companies/{{companyId}}?staff_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "employer", "companies", "{{companyId}}"],
+          "query": [{ "key": "staff_user_id", "value": "{{breneoUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "Employer — patch company",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Employer-Key", "value": "{{employerKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated description from Postman.\",\n  \"industry_ids\": [1, 2]\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/employer/companies/{{companyId}}"
+      }
+    },
+    {
+      "name": "Employer — create staff membership",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Employer-Key", "value": "{{employerKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"company_id\": {{companyId}},\n  \"external_user_id\": \"{{breneoUserId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/employer/staff-memberships"
+      }
+    },
+    {
+      "name": "Employer — list staff memberships",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/employer/staff-memberships?company_id={{companyId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "employer", "staff-memberships"],
+          "query": [{ "key": "company_id", "value": "{{companyId}}" }]
+        }
+      }
+    },
+    {
+      "name": "Employer — patch staff membership",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Employer-Key", "value": "{{employerKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}"
+      }
+    },
+    {
+      "name": "Employer — delete staff membership",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
+        "url": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}"
+      }
+    }
+  ]
+}
