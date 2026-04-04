@@ -6,6 +6,8 @@ builder = "nixpacks"
 
 [deploy]
 # Apply DB migrations before the web process starts (avoids schema/code mismatch after deploy).
+# If admin shows "relation does not exist", the release phase did not run or failed: check
+# Deploy Logs → Release, link Postgres to this service (DATABASE_URL), or run migrate once in Shell.
 releaseCommand = "python manage.py migrate --noinput"
 startCommand = "gunicorn job_aggregator.wsgi --bind 0.0.0.0:$PORT --log-file - --timeout 300 --workers 1 --preload"
 restartPolicyType = "on_failure"

@@ -112,9 +112,20 @@ TEMPLATES = [
 # ---------------------------
 # DATABASE
 # ---------------------------
-# Use DATABASE_URL from environment if available (Render PostgreSQL)
-# Otherwise, fall back to SQLite for local development
-DATABASE_URL = os.environ.get('DATABASE_URL')
+# Railway Postgres often sets DATABASE_URL (host *.railway.internal, in-VPC only) and
+# DATABASE_PUBLIC_URL (internet-reachable). Local `railway shell` / `railway run` injects
+# the same vars but private DNS does not resolve off-platform → OperationalError.
+# When not running inside a container, prefer PUBLIC if private is Railway-internal.
+_private_db = (os.environ.get("DATABASE_URL") or "").strip()
+_public_db = (os.environ.get("DATABASE_PUBLIC_URL") or "").strip()
+_in_container = os.path.exists("/.dockerenv")
+
+if _private_db and _public_db and "railway.internal" in _private_db and not _in_container:
+    DATABASE_URL = _public_db
+elif _private_db:
+    DATABASE_URL = _private_db
+else:
+    DATABASE_URL = _public_db
 
 if DATABASE_URL:
     # Render PostgreSQL (production)
