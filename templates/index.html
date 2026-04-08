@@ -104,6 +104,9 @@
 
         .method.get { background: #dcfce7; color: #166534; }
         .method.post { background: #dbeafe; color: #1e40af; }
+        .method.put { background: #fef3c7; color: #92400e; }
+        .method.patch { background: #fce7f3; color: #9d174d; }
+        .method.delete { background: #fee2e2; color: #991b1b; }
 
         .path {
             font-family: monospace;
@@ -221,7 +224,11 @@
 <div class="container">
     <header>
         <h1>Job Aggregator API</h1>
-        <p class="subtitle">RESTful API for accessing and searching job listings</p>
+        <p class="subtitle">RESTful API for job listings, search, and employer management</p>
+        <p style="margin-top: 12px;">
+            <a href="/api/overview/" class="btn" style="margin: 0;">Download API index (JSON)</a>
+            <span style="color: var(--text-muted); font-size: 0.9rem; margin-left: 12px;">Machine-readable list of every route</span>
+        </p>
     </header>
 
     <div class="card">
@@ -308,17 +315,49 @@
         </div>
 
         <div class="filters-section">
-            <h3>Other endpoints</h3>
+            <h3>Meta &amp; documentation</h3>
             <table class="param-table">
-                <thead>
-                    <tr><th>Endpoint</th><th>Description</th></tr>
-                </thead>
+                <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
                 <tbody>
-                    <tr><td><code>GET /api/</code></td><td>Jobs grouped by company (legacy)</td></tr>
-                    <tr><td><code>GET /api/companies</code></td><td>Company list (optional <code>?name=</code>)</td></tr>
-                    <tr><td><code>GET /api/companies/{company_name}</code></td><td>Company detail and jobs</td></tr>
-                    <tr><td><code>GET /api/job-details?url=...</code></td><td>Fetch and return job details by URL</td></tr>
-                    <tr><td><code>POST /api/trigger-fetch</code></td><td>Trigger job fetch (cron)</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/health/</code></td><td>Health check (plain <code>ok</code>, no DB)</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/overview/</code></td><td>JSON index of all endpoints</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/schema/</code></td><td>OpenAPI schema</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/docs/</code></td><td>Swagger UI</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/redoc/</code></td><td>ReDoc</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="filters-section">
+            <h3>Legacy &amp; public job APIs</h3>
+            <table class="param-table">
+                <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>GET</code></td><td><code>/api/</code></td><td>Active jobs grouped by company</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/search</code></td><td>Search/filter jobs (see parameters above)</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/job-details</code></td><td>Job detail by <code>job_id</code> / external id (see implementation)</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/industries/</code></td><td>List industries (<code>id</code>, <code>name</code>)</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/companies</code></td><td>Company + jobs via <code>?name=</code></td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/companies/{name}</code></td><td>Company + jobs; <code>name</code> URL-encoded in path</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/trigger-fetch</code></td><td>Run <code>fetch_jobs</code> (optional <code>secret</code> if <code>FETCH_SECRET</code> set)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="filters-section">
+            <h3>Employer API <span class="endpoint-badge">X-Employer-Key</span></h3>
+            <p style="font-size: 0.95rem; color: var(--text-muted);">Send header <code>X-Employer-Key</code> equal to server env <code>EMPLOYER_POST_SECRET</code> (from Breneo backend / BFF only). Company detail and members use numeric <code>company_id</code> in the path.</p>
+            <table class="param-table">
+                <thead><tr><th>Methods</th><th>Path</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/companies</code></td><td>List (<code>?search=</code>, <code>?external_user_id=</code>); create company</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/employer/companies/for-user</code></td><td>User’s companies (<code>?external_user_id=</code> required)</td></tr>
+                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code></td><td><code>/api/employer/companies/{company_id}</code></td><td>Detail / update; optional <code>?external_user_id=</code></td></tr>
+                    <tr><td><code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/companies/{company_id}/members</code></td><td>Add/remove staff (<code>external_user_id</code> in body or query)</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/staff-memberships</code></td><td>List (<code>?company_id=</code>, <code>?external_user_id=</code>); create</td></tr>
+                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code></td><td><code>/api/employer/staff-memberships/{id}</code></td><td>Membership CRUD</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/jobs</code></td><td>List (<code>?company_id=</code> or <code>?company=</code>); create job</td></tr>
+                    <tr><td><code>GET</code>, <code>PATCH</code>, <code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/jobs/{job_id}</code></td><td>Job CRUD; optional <code>?company_id=</code>; POST mirrors PATCH</td></tr>
                 </tbody>
             </table>
         </div>
@@ -335,21 +374,35 @@
     </div>
 
     <div class="card">
-        <h2>Legacy Endpoints</h2>
+        <h2>Quick links</h2>
         <ul class="endpoint-list">
+            <li class="endpoint-item">
+                <div>
+                    <span class="method get">GET</span>
+                    <a href="/api/overview/" class="path">/api/overview/</a>
+                </div>
+                <span class="desc">All endpoints as JSON</span>
+            </li>
             <li class="endpoint-item">
                 <div>
                     <span class="method get">GET</span>
                     <a href="/api/" class="path">/api/</a>
                 </div>
-                <span class="desc">Jobs Grouped by Company</span>
+                <span class="desc">Jobs grouped by company</span>
             </li>
             <li class="endpoint-item">
                 <div>
                     <span class="method get">GET</span>
                     <a href="/api/companies" class="path">/api/companies</a>
                 </div>
-                <span class="desc">Company Information</span>
+                <span class="desc">Companies (public)</span>
+            </li>
+            <li class="endpoint-item">
+                <div>
+                    <span class="method get">GET</span>
+                    <a href="/health/" class="path">/health/</a>
+                </div>
+                <span class="desc">Health check</span>
             </li>
         </ul>
     </div>

@@ -67,6 +67,21 @@ INSTALLED_APPS = [
 
 ]
 
+_CLOUDINARY_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
+if _CLOUDINARY_NAME:
+    _idx = INSTALLED_APPS.index("django.contrib.staticfiles") + 1
+    INSTALLED_APPS = (
+        INSTALLED_APPS[:_idx]
+        + ["cloudinary_storage", "cloudinary"]
+        + INSTALLED_APPS[_idx:]
+    )
+    CLOUDINARY_STORAGE = {
+        "CLOUD_NAME": _CLOUDINARY_NAME,
+        "API_KEY": os.environ.get("CLOUDINARY_API_KEY", ""),
+        "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET", ""),
+    }
+    DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+
 # ---------------------------
 # MIDDLEWARE
 # ---------------------------

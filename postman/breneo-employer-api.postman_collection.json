@@ -8,7 +8,6 @@
     { "key": "baseUrl", "value": "https://breneo-job-aggregator.up.railway.app" },
     { "key": "employerKey", "value": "PASTE_YOUR_EMPLOYER_POST_SECRET_HERE" },
     { "key": "companyId", "value": "18" },
-    { "key": "companyNameEncoded", "value": "Acme%20Test%20Co" },
     { "key": "breneoUserId", "value": "your-breneo-user-id-string" },
     { "key": "membershipId", "value": "1" }
   ],
@@ -56,9 +55,9 @@
         "method": "GET",
         "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
         "url": {
-          "raw": "{{baseUrl}}/api/employer/companies/{{companyNameEncoded}}?staff_user_id={{breneoUserId}}",
+          "raw": "{{baseUrl}}/api/employer/companies/{{companyId}}?staff_user_id={{breneoUserId}}",
           "host": ["{{baseUrl}}"],
-          "path": ["api", "employer", "companies", "{{companyNameEncoded}}"],
+          "path": ["api", "employer", "companies", "{{companyId}}"],
           "query": [{ "key": "staff_user_id", "value": "{{breneoUserId}}" }]
         }
       }
@@ -76,7 +75,7 @@
           "raw": "{\n  \"description\": \"Updated description from Postman.\",\n  \"industry_ids\": [1, 2]\n}",
           "options": { "raw": { "language": "json" } }
         },
-        "url": "{{baseUrl}}/api/employer/companies/{{companyNameEncoded}}"
+        "url": "{{baseUrl}}/api/employer/companies/{{companyId}}"
       }
     },
     {

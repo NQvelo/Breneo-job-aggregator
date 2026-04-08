@@ -1,0 +1,94 @@
+PROMPT: Implement employer “company profile” edit on the frontend
+
+GOAL
+Build a screen where a logged-in employer can view and update their company’s profile fields on the job-aggregator backend. Do not mix this with Breneo-auth APIs except to obtain the current user id for scoped requests.
+
+NOT THE PUBLIC JOB SITE
+- Employer company read/update uses /api/employer/companies/{company_id} with an INTEGER id only.
+- The public endpoints /api/companies and /api/companies/{company_name} are for the job board (name in path) — do not use those URLs for employer PATCH/PUT.
+
+BASE URL
+- Job aggregator only, e.g. https://breneo-job-aggregator.up.railway.app
+- All paths below are prefixed with /api/
+
+AUTH (mandatory)
+- Never put EMPLOYER_POST_SECRET in browser code.
+- From the browser, call your BFF/server route; the server forwards:
+  Header: X-Employer-Key: <same value as EMPLOYER_POST_SECRET on the aggregator>
+- Optional scoped access: append ?external_user_id=<breneo_user_id> (alias staff_user_id) so the backend only allows users who are staff on that company.
+
+IDENTITY
+- After Breneo login, read the current user id (string). Use it as external_user_id on aggregator calls from the BFF when using scoped mode.
+
+HOW COMPANY IS ADDRESSED IN URLs
+- Detail and update use the numeric company primary key in the path: /api/employer/companies/{company_id}
+- Example: /api/employer/companies/680
+- Get company_id from GET /api/employer/companies or GET /api/employer/companies/for-user response JSON ("id" field).
+
+LOAD PROFILE (read)
+- GET /api/employer/companies/{company_id}
+  Optional: ?external_user_id=...
+- Response includes employer_created (boolean, read-only). For employer-created companies, logo is only from logo_upload or the logo URL field — no third-party auto logo API; if neither is set, logo may be empty. For imported companies, logo may still fall back to a generated URL from the company name.
+
+ALTERNATIVE “my companies” LIST
+- GET /api/employer/companies/for-user?external_user_id=<id>
+  Use to pick which company to edit (each item has id + name).
+
+SAVE PROFILE (write)
+- Prefer PATCH for a normal “save changes” form (send only changed fields).
+- PATCH /api/employer/companies/{company_id}
+  Optional: ?external_user_id=...
+
+- Two content types are supported:
+  1) application/json — same as before for text fields and industry_ids / industry_names (arrays as JSON).
+  2) multipart/form-data — required when uploading a logo file. Use form field name logo_upload (file). Other fields can be sent as form parts (e.g. description as a string part). Repeat industry_ids as multiple parts or send a single JSON part if your stack allows; if in doubt, use JSON for metadata-only updates and a separate multipart PATCH when only changing the image.
+
+- PUT /api/employer/companies/{company_id} is full replace: send every writable field including name if your client uses PUT (JSON or multipart same rules as PATCH).
+
+EDITABLE FIELDS (match backend, snake_case)
+- name (string)
+- domain (string, optional)
+- logo (URL string, optional) — external logo URL; APIs still return a single resolved logo URL (upload wins over this).
+- logo_upload (file, write-only) — multipart only; replaces any previous uploaded logo on the server.
+- platform (string, optional, e.g. ATS name)
+- description (string, optional)
+- website (URL string, optional)
+- founded_date (ISO date string "YYYY-MM-DD", optional)
+- employees_count (string, optional, e.g. "51-200")
+- social_links (object, optional, e.g. { "linkedin": "..." })
+- additional_details (object, optional)
+- company_email (email string, optional)
+- industry_ids (array of integers, optional, write-only)
+- industry_names (array of strings, optional, write-only)
+
+INDUSTRIES DROPDOWN (read-only public list on aggregator)
+- GET /api/industries/ — use to populate multi-select; submit selected ids as industry_ids and/or industry_names.
+
+WHAT NOT TO DO ON THIS SCREEN
+- Do not edit staff roster here. Use:
+  - GET/POST /api/employer/staff-memberships
+  - or POST/DELETE /api/employer/companies/{company_id}/members
+- Do not confuse with public job-board company pages: GET /api/companies?... is not the employer update API.
+
+UX / STATE RULES
+1) Keep company_id (integer) in route or state for PATCH/GET URLs.
+2) On successful PATCH that changes name: company_id in the URL stays the same.
+3) Show validation errors from 400 responses; 403 = auth; 404 = wrong id or not allowed for scoped user.
+4) Use one HTTP client instance with base URL = job aggregator only (see docs/frontend-dual-base-url-prompt.txt if you also call Breneo-api).
+
+MINIMAL PATCH EXAMPLE (server-side fetch pseudocode)
+PATCH ${AGGREGATOR_BASE_URL}/api/employer/companies/${companyId}?external_user_id=${encodeURIComponent(userId)}
+Headers: X-Employer-Key, Content-Type: application/json
+Body: { "description": "...", "website": "https://...", "industry_ids": [1, 2] }
+
+LOGO FILE UPLOAD (multipart)
+- FormData: append logo_upload (File/Blob), plus other fields as needed.
+- Do not set Content-Type manually when using FormData (let the client set the boundary).
+- Production file storage uses Cloudinary when the server has CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET set; local dev without those uses MEDIA files (DEBUG serves /media/…).
+
+FRONTEND ROUTING (example)
+- Page URL: /employer/settings/company/[companyId] where companyId is digits only (parseInt validated).
+- Load: GET …/api/employer/companies/${companyId}
+- Save: PATCH …/api/employer/companies/${companyId}
+
+End of prompt.

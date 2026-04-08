@@ -1,8 +1,7 @@
 """Employer-facing company + industry API (synced with breneo-api user ids)."""
 
-from urllib.parse import unquote
-
 from rest_framework import status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -55,15 +54,12 @@ def _company_queryset_base():
     ).order_by("name")
 
 
-def _company_from_path_segment(company_name: str) -> Company | None:
-    """
-    Resolve employer URL path segment to a Company. `name` is unique on the model.
-    Path is URL-decoded (e.g. %20 → space). Match is case-insensitive.
-    """
-    raw = unquote((company_name or "").strip())
-    if not raw:
-        return None
-    return Company.objects.filter(name__iexact=raw).first()
+def _employer_company_by_id(company_id: int) -> Company | None:
+    return (
+        Company.objects.prefetch_related("industries", "staff_memberships")
+        .filter(pk=company_id)
+        .first()
+    )
 
 
 class EmployerStaffMembershipListCreateView(APIView):
@@ -176,16 +172,17 @@ class EmployerCompanyForUserView(APIView):
             .filter(staff_memberships__external_user_id=uid)
             .distinct()
         )
-        return Response(CompanyDetailSerializer(qs, many=True).data)
+        return Response(
+            CompanyDetailSerializer(qs, many=True, context={"request": request}).data
+        )
 
 
 class EmployerCompanyMemberView(APIView):
     """
     Convenience attach / detach by company + user (same rows as staff-memberships).
 
-    POST   /api/employer/companies/<company_name>/members  JSON {"external_user_id": "..."}
-    DELETE /api/employer/companies/<company_name>/members?external_user_id=...
-    company_name: URL-encoded company name (unique). Response bodies still include company "id".
+    POST   /api/employer/companies/<company_id>/members  JSON {"external_user_id": "..."}
+    DELETE /api/employer/companies/<company_id>/members?external_user_id=...
     Body key staff_user_id is accepted as an alias for external_user_id.
     """
 
@@ -207,8 +204,8 @@ class EmployerCompanyMemberView(APIView):
             )
         return uid, None
 
-    def post(self, request, company_name: str):
-        company = _company_from_path_segment(company_name)
+    def post(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -220,12 +217,15 @@ class EmployerCompanyMemberView(APIView):
             company=company, external_user_id=uid
         )
         out = CompanyDetailSerializer(
-            Company.objects.prefetch_related("industries", "staff_memberships").get(pk=company.pk)
+            Company.objects.prefetch_related("industries", "staff_memberships").get(
+                pk=company.pk
+            ),
+            context={"request": request},
         ).data
         return Response(out, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
-    def delete(self, request, company_name: str):
-        company = _company_from_path_segment(company_name)
+    def delete(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -250,6 +250,7 @@ class EmployerCompanyListCreateView(APIView):
 
     authentication_classes = []
     permission_classes = [CanPostEmployerJob]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get(self, request):
         qs = _company_queryset_base()
@@ -259,7 +260,9 @@ class EmployerCompanyListCreateView(APIView):
         search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(name__icontains=search)
-        return Response(CompanyDetailSerializer(qs, many=True).data)
+        return Response(
+            CompanyDetailSerializer(qs, many=True, context={"request": request}).data
+        )
 
     def post(self, request):
         ser = EmployerCompanyWriteSerializer(data=request.data)
@@ -268,42 +271,36 @@ class EmployerCompanyListCreateView(APIView):
         company = Company.objects.prefetch_related("industries", "staff_memberships").get(
             pk=company.pk
         )
-        out = CompanyDetailSerializer(company).data
+        out = CompanyDetailSerializer(
+            company, context={"request": request}
+        ).data
         return Response(out, status=status.HTTP_201_CREATED)
 
 
 class EmployerCompanyDetailView(APIView):
     """
-    GET   /api/employer/companies/<company_name>
-    PUT   /api/employer/companies/<company_name>  — full update (all writable fields)
-    PATCH /api/employer/companies/<company_name>
-    company_name: URL-encoded unique name (not numeric id). JSON still includes "id".
+    GET   /api/employer/companies/<company_id>
+    PUT   /api/employer/companies/<company_id>  — full update (all writable fields)
+    PATCH /api/employer/companies/<company_id>
     Optional: ?staff_user_id= or ?external_user_id= for access check.
     """
 
     authentication_classes = []
     permission_classes = [CanPostEmployerJob]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    def _get_company(self, company_name: str) -> Company | None:
-        c = _company_from_path_segment(company_name)
-        if not c:
-            return None
-        return (
-            Company.objects.prefetch_related("industries", "staff_memberships")
-            .filter(pk=c.pk)
-            .first()
-        )
-
-    def get(self, request, company_name: str):
-        company = self._get_company(company_name)
+    def get(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(CompanyDetailSerializer(company).data)
+        return Response(
+            CompanyDetailSerializer(company, context={"request": request}).data
+        )
 
-    def put(self, request, company_name: str):
-        company = self._get_company(company_name)
+    def put(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
@@ -315,10 +312,12 @@ class EmployerCompanyDetailView(APIView):
         updated = Company.objects.prefetch_related("industries", "staff_memberships").get(
             pk=updated.pk
         )
-        return Response(CompanyDetailSerializer(updated).data)
+        return Response(
+            CompanyDetailSerializer(updated, context={"request": request}).data
+        )
 
-    def patch(self, request, company_name: str):
-        company = self._get_company(company_name)
+    def patch(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         if not _staff_scoped_access(request, company):
@@ -330,4 +329,6 @@ class EmployerCompanyDetailView(APIView):
         updated = Company.objects.prefetch_related("industries", "staff_memberships").get(
             pk=updated.pk
         )
-        return Response(CompanyDetailSerializer(updated).data)
+        return Response(
+            CompanyDetailSerializer(updated, context={"request": request}).data
+        )

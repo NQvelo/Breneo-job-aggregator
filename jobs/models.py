@@ -68,8 +68,16 @@ class Company(models.Model):
     # Optional domain (useful for enrichment / logo fetching)
     domain = models.CharField(max_length=200, blank=True, null=True)
 
-    # Logo URL (Logo.dev, etc.)
+    # Logo URL (Logo.dev, external CDN, etc.) — optional when logo_upload is set
     logo = models.URLField(blank=True, null=True, help_text="Company logo URL")
+
+    # Employer-uploaded logo (Cloudinary when CLOUDINARY_* env is set; else local media/)
+    logo_upload = models.ImageField(
+        upload_to="employer_logos/",
+        blank=True,
+        null=True,
+        help_text="Uploaded company logo (multipart field name: logo_upload)",
+    )
 
     # Primary ATS platform (greenhouse, lever, ashby, etc.)
     platform = models.CharField(
@@ -116,6 +124,9 @@ class Company(models.Model):
         help_text="Additional company information (industry, headquarters, etc.)",
         default=dict,
     )
+
+    # True when created via POST /api/employer/companies — not from job import; no auto-generated logo API
+    employer_created = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

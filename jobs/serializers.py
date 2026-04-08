@@ -65,15 +65,10 @@ class JobSerializer(DynamicFieldsModelSerializer):
 
     def get_company_logo(self, obj):
         """Get company logo from company model"""
-        from jobs.fetchers import get_logo_url
-        
-        # Use company logo if it exists
-        if obj.company and obj.company.logo:
-            return obj.company.logo
-        
-        # Generate logo URL using the correct format
+        from jobs.logo_url import resolved_company_logo_url
+
         if obj.company:
-            return get_logo_url(obj.company.name)
+            return resolved_company_logo_url(obj.company, self.context.get("request"))
         return None
 
 
@@ -127,23 +122,17 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         fields = [
             'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
-            'industries', 'company_email', 'staff_user_ids',
+            'industries', 'company_email', 'staff_user_ids', 'employer_created',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'employer_created']
 
     def get_staff_user_ids(self, obj):
         return company_staff_user_ids_for_api(obj)
     
     def get_logo(self, obj):
-        """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
-        from jobs.fetchers import get_logo_url
-        
-        # If logo exists and is in the correct format, return it
-        if obj.logo and 'img.logo.dev/name/' in obj.logo:
-            return obj.logo
-        
-        # Otherwise, generate the logo URL using the correct format
-        return get_logo_url(obj.name)
+        from jobs.logo_url import resolved_company_logo_url
+
+        return resolved_company_logo_url(obj, self.context.get("request"))
     
     def to_representation(self, instance):
         """Ensure None values are handled properly"""
@@ -198,23 +187,17 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
             'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
             'industries', 'company_email', 'staff_user_ids',
-            'created_at', 'updated_at', 'job_count'
+            'created_at', 'updated_at', 'job_count', 'employer_created',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'employer_created']
 
     def get_staff_user_ids(self, obj):
         return company_staff_user_ids_for_api(obj)
     
     def get_logo(self, obj):
-        """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
-        from jobs.fetchers import get_logo_url
-        
-        # If logo exists and is in the correct format, return it
-        if obj.logo and 'img.logo.dev/name/' in obj.logo:
-            return obj.logo
-        
-        # Otherwise, generate the logo URL using the correct format
-        return get_logo_url(obj.name)
+        from jobs.logo_url import resolved_company_logo_url
+
+        return resolved_company_logo_url(obj, self.context.get("request"))
     
     def get_job_count(self, obj):
         """Get count of active jobs for this company"""
@@ -250,20 +233,14 @@ class CompanyJobsSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "domain", "logo", "platform", "industries", "jobs"]
     
     def get_logo(self, obj):
-        """Ensure logo uses the correct format: https://img.logo.dev/name/{name}?token=..."""
-        from jobs.fetchers import get_logo_url
-        
-        # If logo exists and is in the correct format, return it
-        if obj.logo and 'img.logo.dev/name/' in obj.logo:
-            return obj.logo
-        
-        # Otherwise, generate the logo URL using the correct format
-        return get_logo_url(obj.name)
+        from jobs.logo_url import resolved_company_logo_url
+
+        return resolved_company_logo_url(obj, self.context.get("request"))
     
     def get_jobs(self, obj):
         # Filter only active jobs and serialize them
         active_jobs = obj.jobs.filter(is_active=True)
-        return NestedJobSerializer(active_jobs, many=True).data
+        return NestedJobSerializer(active_jobs, many=True, context=self.context).data
     
     def to_representation(self, instance):
         """Ensure domain is empty string instead of None"""
@@ -337,6 +314,13 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
 class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
     """Create/update company via employer API. Staff links: POST/PATCH /api/employer/staff-memberships/."""
 
+    logo_upload = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        write_only=True,
+        help_text="Multipart file field; use multipart/form-data with JSON fields as form parts.",
+    )
+
     industry_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
         required=False,
@@ -362,6 +346,7 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
             "social_links",
             "additional_details",
             "company_email",
+            "logo_upload",
             "industry_ids",
             "industry_names",
         ]
@@ -384,12 +369,16 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
         industry_names = validated_data.pop("industry_names", None)
         if not validated_data.get("name"):
             raise serializers.ValidationError({"name": "This field is required."})
+        validated_data["employer_created"] = True
         company = Company.objects.create(**validated_data)
         if industry_ids is not None or industry_names is not None:
             self._apply_industries(company, industry_ids, industry_names)
         return company
 
     def update(self, instance, validated_data):
+        if validated_data.get("logo_upload"):
+            if instance.logo_upload:
+                instance.logo_upload.delete(save=False)
         industry_ids = validated_data.pop("industry_ids", serializers.empty)
         industry_names = validated_data.pop("industry_names", serializers.empty)
         company = super().update(instance, validated_data)

@@ -1,0 +1,88 @@
+FRONTEND INTEGRATION — TWO BASE URLs (DO NOT MIX)
+
+You must use exactly two origins in the app. Each HTTP client must be configured with ONE base URL only. Never call a path that belongs to service A using service B’s origin, and never merge path strings from different docs onto the wrong host.
+
+-------------------------------------------------------------------------------
+BASE URL A — JOB AGGREGATOR (this repo / “breneo-job-aggregator”)
+-------------------------------------------------------------------------------
+
+Suggested env name (server-side preferred for employer): JOB_AGGREGATOR_BASE_URL
+Example: https://breneo-job-aggregator.up.railway.app
+
+Use ONLY for:
+- Job listings, search, public company pages, industries, health, OpenAPI docs
+- All routes under /api/ that are NOT your Breneo product API
+
+Full URL shape: {JOB_AGGREGATOR_BASE_URL}{path below}
+Paths always start with / (no trailing slash on the env value).
+
+--- Meta & docs ---
+GET  /health/
+GET  /api/overview/
+GET  /api/schema/
+GET  /api/docs/
+GET  /api/redoc/
+
+--- Public / legacy jobs ---
+GET  /api/
+GET  /api/search
+GET  /api/job-details
+GET  /api/v1/jobs/
+GET  /api/v1/jobs/{id}/
+
+--- Public companies (job board) ---
+GET  /api/industries/
+GET  /api/companies
+GET  /api/companies/{company_name}     (URL-encoded name in path)
+
+--- Operations ---
+GET,POST  /api/trigger-fetch
+
+--- Employer (aggregator) — call from server/BFF with X-Employer-Key; do not expose secret in browser ---
+Note: {company_id} is the integer primary key from company JSON ("id"). Do not use company name or URL-encoded name in these employer paths (unlike public GET /api/companies/{company_name}).
+GET,POST       /api/employer/companies
+GET            /api/employer/companies/for-user
+GET,PUT,PATCH  /api/employer/companies/{company_id}
+POST,DELETE    /api/employer/companies/{company_id}/members
+GET,POST       /api/employer/staff-memberships
+GET,PUT,PATCH,DELETE  /api/employer/staff-memberships/{membership_id}
+GET,POST       /api/employer/jobs
+GET,PATCH,POST,DELETE /api/employer/jobs/{job_id}
+
+Human HTML index (not JSON API): GET /  (same origin as BASE URL A)
+
+-------------------------------------------------------------------------------
+BASE URL B — BRENEO API (your other backend; auth, users, sessions, business logic)
+-------------------------------------------------------------------------------
+
+Suggested env name: BRENEO_API_BASE_URL
+Example: https://<your-breneo-api-host>  (replace with your real deployment)
+
+Use ONLY for endpoints defined in YOUR Breneo-api project (auth, user profile, tokens, anything that is NOT listed under BASE URL A above).
+
+Do NOT prefix Breneo paths with the job-aggregator host.
+Do NOT call job-aggregator paths on the Breneo host.
+
+If a feature needs both systems:
+- Example: after Breneo login you obtain user.id → that string is external_user_id when calling BASE URL A employer routes from the server.
+- The browser talks to Breneo (or your Next API routes); your server talks to the job-aggregator with X-Employer-Key where required.
+
+-------------------------------------------------------------------------------
+RULES TO PREVENT MIX-UPS
+-------------------------------------------------------------------------------
+
+1. Create two small API clients: createJobAggregatorClient() and createBreneoApiClient() — each wraps fetch/axios with exactly one baseURL.
+2. Never do: `${BRENEO_API_BASE_URL}/api/employer/...` — employer APIs live on the aggregator.
+3. Never do: `${JOB_AGGREGATOR_BASE_URL}/api/auth/...` unless you have explicitly mounted auth there (default: you do not).
+4. Path prefixes /api/ on both servers are NOT interchangeable; compare the full path list to this document.
+5. For discovery on the aggregator only: GET {JOB_AGGREGATOR_BASE_URL}/api/overview/ returns JSON of all aggregator routes.
+
+-------------------------------------------------------------------------------
+QUICK CHECK
+-------------------------------------------------------------------------------
+
+- Listing jobs for the public site → BASE URL A + /api/search or /api/v1/jobs/
+- Logging in / session / “me” user → BASE URL B (your Breneo routes)
+- Employer company CRUD / staff memberships / employer jobs → BASE URL A + /api/employer/... (with server-side key)
+
+End of prompt.

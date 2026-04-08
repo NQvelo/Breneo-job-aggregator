@@ -1,4 +1,6 @@
 from django.urls import path
+
+from .api_overview import ApiOverviewView
 from .views import (
     JobsGroupedByCompany,
     JobSearchView,
@@ -19,6 +21,7 @@ from .employer_company_views import (
 )
 
 urlpatterns = [
+    path('overview/', ApiOverviewView.as_view(), name='api_overview'),
     path('', JobsGroupedByCompany.as_view(), name='jobs_grouped_by_company'),  # /api/ will point here
     path('search', JobSearchView.as_view(), name='job_search'),  # /api/search
     path('job-details', JobDetailsView.as_view(), name='job_details'),  # /api/job-details
@@ -37,13 +40,13 @@ urlpatterns = [
     ),
     path('employer/companies/for-user', EmployerCompanyForUserView.as_view(), name='employer_company_for_user'),
     path(
-        'employer/companies/<path:company_name>/members',
+        'employer/companies/<int:company_id>/members',
         EmployerCompanyMemberView.as_view(),
         name='employer_company_members',
     ),
     path('employer/companies', EmployerCompanyListCreateView.as_view(), name='employer_company_list_create'),
     path(
-        'employer/companies/<path:company_name>',
+        'employer/companies/<int:company_id>',
         EmployerCompanyDetailView.as_view(),
         name='employer_company_detail',
     ),

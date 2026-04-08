@@ -44,7 +44,9 @@ class JobsGroupedByCompany(APIView):
             .filter(jobs__is_active=True)
             .distinct()
         )
-        serializer = CompanyJobsSerializer(companies, many=True)
+        serializer = CompanyJobsSerializer(
+            companies, many=True, context={"request": request}
+        )
         return Response(serializer.data)
 
 
@@ -315,7 +317,9 @@ class JobSearchView(APIView):
                 )
         
         # Serialize jobs
-        serializer = NestedJobSerializer(jobs_list, many=True)
+        serializer = NestedJobSerializer(
+            jobs_list, many=True, context={"request": request}
+        )
         
         # Prepare response
         response_data = {
@@ -375,7 +379,9 @@ class CompanyDetailView(APIView):
             if company_id:
                 try:
                     company = Company.objects.get(id=int(company_id))
-                    serializer = CompanyDetailSerializer(company)
+                    serializer = CompanyDetailSerializer(
+                        company, context={"request": request}
+                    )
                     return Response(serializer.data)
                 except (ValueError, Company.DoesNotExist):
                     return Response(
@@ -399,7 +405,9 @@ class CompanyDetailView(APIView):
                 company = companies.first()
             elif companies.count() > 1:
                 # Multiple matches, return list
-                serializer = CompanyDetailSerializer(companies, many=True)
+                serializer = CompanyDetailSerializer(
+                    companies, many=True, context={"request": request}
+                )
                 return Response({
                     'matches': serializer.data,
                     'message': f'Multiple companies found matching "{company_name}". Please be more specific.'
@@ -410,7 +418,9 @@ class CompanyDetailView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
         
-        serializer = CompanyDetailSerializer(company)
+        serializer = CompanyDetailSerializer(
+            company, context={"request": request}
+        )
         return Response(serializer.data)
 
 
@@ -480,8 +490,8 @@ class JobDetailsView(APIView):
                     )
         
         # Serialize job details
-        serializer = NestedJobSerializer(job)
-        
+        serializer = NestedJobSerializer(job, context={"request": request})
+
         return Response(serializer.data)
 
 
@@ -528,7 +538,9 @@ class EmployerJobCreateView(APIView):
             jobs = jobs.filter(company__name__iexact=company_name)
 
         jobs = jobs.order_by("-posted_at", "-fetched_at")
-        serializer = NestedJobSerializer(jobs, many=True)
+        serializer = NestedJobSerializer(
+            jobs, many=True, context={"request": request}
+        )
         return Response(serializer.data)
 
     def post(self, request):
@@ -545,7 +557,7 @@ class EmployerJobCreateView(APIView):
             apply_url=data.get("apply_url") or None,
             is_active=data.get("is_active", True),
         )
-        out = NestedJobSerializer(job).data
+        out = NestedJobSerializer(job, context={"request": request}).data
         return Response(out, status=status.HTTP_201_CREATED)
 
 
@@ -589,7 +601,9 @@ class EmployerJobDetailView(APIView):
         if err == "not_found" or job is None:
             return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(NestedJobSerializer(job).data)
+        return Response(
+            NestedJobSerializer(job, context={"request": request}).data
+        )
 
     def _update(self, request, job_id: int):
         job, err = _resolve_employer_job(request, job_id)
@@ -610,7 +624,10 @@ class EmployerJobDetailView(APIView):
         except ValueError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(NestedJobSerializer(updated).data, status=status.HTTP_200_OK)
+        return Response(
+            NestedJobSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     def patch(self, request, job_id: int):
         return self._update(request, job_id)
