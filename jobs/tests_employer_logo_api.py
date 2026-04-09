@@ -65,9 +65,8 @@ class EmployerCompanyLogoAPITests(TestCase):
         self.company.refresh_from_db()
         self.assertTrue(bool(self.company.logo_upload.name))
         self.assertIn("logo", response.data)
-        self.assertIn("logo_upload", response.data)
-        # With local FileSystemStorage, URLs are /media/...; API hides those from JSON by design.
-        # Upload success is proven by the model field above; production Cloudinary URLs appear in logo/logo_upload.
+        # Uploaded image is reflected in resolved `logo` (no separate logo_upload in JSON).
+        self.assertTrue(bool(response.data.get("logo")))
 
     def test_update_without_image(self):
         response = self.client.patch(
@@ -115,7 +114,7 @@ class EmployerCompanyLogoAPITests(TestCase):
             self.url_with_uid,
         )
         self.assertEqual(deleted.status_code, status.HTTP_200_OK)
-        self.assertEqual(deleted.data["logo_upload"], None)
+        self.assertTrue(deleted.data.get("success"))
         self.company.refresh_from_db()
         self.assertFalse(bool(self.company.logo_upload))
 

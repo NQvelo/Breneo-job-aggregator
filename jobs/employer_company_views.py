@@ -381,7 +381,7 @@ class EmployerCompanyDetailView(APIView):
 
         if not company.logo_upload:
             return Response(
-                {"success": True, "logo_upload": None, "message": "No logo_upload to delete."},
+                {"success": True, "message": "No uploaded logo to delete."},
                 status=status.HTTP_200_OK,
             )
         try:
@@ -394,6 +394,6 @@ class EmployerCompanyDetailView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response(
-            {"success": True, "logo_upload": None, "message": "Company logo deleted."},
+            {"success": True, "message": "Company logo deleted."},
             status=status.HTTP_200_OK,
         )
