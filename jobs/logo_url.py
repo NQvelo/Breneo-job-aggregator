@@ -13,21 +13,22 @@ def resolved_company_logo_url(company, request=None) -> str:
     """
     from jobs.fetchers import get_logo_url
 
+    def _public_url_or_empty(url: str | None) -> str:
+        if not url:
+            return ""
+        # Never expose local media URLs in API responses.
+        if url.startswith("/media/") or "/media/employer_logos/" in url:
+            return ""
+        if request is not None and url.startswith("/"):
+            return request.build_absolute_uri(url)
+        return url
+
     if getattr(company, "employer_logo", None) and company.employer_logo:
-        url = company.employer_logo.url
-        if request is not None and url.startswith("/"):
-            return request.build_absolute_uri(url)
-        return url
+        return _public_url_or_empty(company.employer_logo.url)
     if getattr(company, "logo_upload", None) and company.logo_upload:
-        url = company.logo_upload.url
-        if request is not None and url.startswith("/"):
-            return request.build_absolute_uri(url)
-        return url
+        return _public_url_or_empty(company.logo_upload.url)
     if company.logo:
-        url = company.logo
-        if request is not None and url.startswith("/"):
-            return request.build_absolute_uri(url)
-        return url
+        return _public_url_or_empty(company.logo)
     if getattr(company, "employer_created", False):
         return ""
     return get_logo_url(company.name)

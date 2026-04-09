@@ -139,6 +139,8 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         if not getattr(obj, "employer_logo", None):
             return None
         url = obj.employer_logo.url
+        if url.startswith("/media/") or "/media/employer_logos/" in url:
+            return None
         if self.context.get("request") is not None and url.startswith("/"):
             return self.context["request"].build_absolute_uri(url)
         return url
@@ -213,6 +215,8 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
         if not getattr(obj, "employer_logo", None):
             return None
         url = obj.employer_logo.url
+        if url.startswith("/media/") or "/media/employer_logos/" in url:
+            return None
         if self.context.get("request") is not None and url.startswith("/"):
             return self.context["request"].build_absolute_uri(url)
         return url
