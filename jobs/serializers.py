@@ -114,13 +114,14 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
 class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     """Serializer for company information nested within job responses"""
     logo = serializers.SerializerMethodField()
+    logo_upload = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
     staff_user_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
         fields = [
-            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'id', 'name', 'domain', 'logo', 'logo_upload', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
             'industries', 'company_email', 'staff_user_ids', 'employer_created',
         ]
@@ -133,6 +134,16 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         from jobs.logo_url import resolved_company_logo_url
 
         return resolved_company_logo_url(obj, self.context.get("request"))
+
+    def get_logo_upload(self, obj):
+        if not getattr(obj, "logo_upload", None):
+            return None
+        url = obj.logo_upload.url
+        if url.startswith("/media/") or "/media/employer_logos/" in url:
+            return None
+        if self.context.get("request") is not None and url.startswith("/"):
+            return self.context["request"].build_absolute_uri(url)
+        return url
 
     def to_representation(self, instance):
         """Ensure None values are handled properly"""
@@ -177,6 +188,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
 class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     """Serializer for company details with all fields"""
     logo = serializers.SerializerMethodField()
+    logo_upload = serializers.SerializerMethodField()
     job_count = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
     staff_user_ids = serializers.SerializerMethodField()
@@ -184,7 +196,7 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = Company
         fields = [
-            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'id', 'name', 'domain', 'logo', 'logo_upload', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
             'industries', 'company_email', 'staff_user_ids',
             'created_at', 'updated_at', 'job_count', 'employer_created',
@@ -198,6 +210,16 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
         from jobs.logo_url import resolved_company_logo_url
 
         return resolved_company_logo_url(obj, self.context.get("request"))
+
+    def get_logo_upload(self, obj):
+        if not getattr(obj, "logo_upload", None):
+            return None
+        url = obj.logo_upload.url
+        if url.startswith("/media/") or "/media/employer_logos/" in url:
+            return None
+        if self.context.get("request") is not None and url.startswith("/"):
+            return self.context["request"].build_absolute_uri(url)
+        return url
 
     def get_job_count(self, obj):
         """Get count of active jobs for this company"""
