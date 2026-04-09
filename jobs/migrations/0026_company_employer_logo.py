@@ -1,4 +1,3 @@
-from cloudinary_storage.storage import MediaCloudinaryStorage
 from django.db import migrations, models
 
 
@@ -16,7 +15,6 @@ class Migration(migrations.Migration):
                 blank=True,
                 help_text="Uploaded employer profile logo (multipart field name: employer_logo)",
                 null=True,
-                storage=MediaCloudinaryStorage(),
                 upload_to="employer_logos/",
             ),
         ),
