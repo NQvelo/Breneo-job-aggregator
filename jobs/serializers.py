@@ -338,6 +338,14 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
         write_only=True,
         help_text="Multipart file field; use multipart/form-data with input key employer_logo.",
     )
+    # Backward-compatible alias for clients still sending logo_upload.
+    logo_upload = serializers.ImageField(
+        source="employer_logo",
+        required=False,
+        allow_null=True,
+        write_only=True,
+        help_text="Alias of employer_logo.",
+    )
 
     industry_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
@@ -371,6 +379,7 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
             "additional_details",
             "company_email",
             "employer_logo",
+            "logo_upload",
             "industry_ids",
             "industry_names",
         ]

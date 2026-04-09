@@ -84,6 +84,11 @@ if _CLOUDINARY_NAME:
         f"cloudinary://{CLOUDINARY_STORAGE['API_KEY']}:"
         f"{CLOUDINARY_STORAGE['API_SECRET']}@{CLOUDINARY_STORAGE['CLOUD_NAME']}"
     )
+    STORAGES = {
+        "default": {
+            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        },
+    }
     DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # ---------------------------
