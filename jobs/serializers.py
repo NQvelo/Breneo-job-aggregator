@@ -332,6 +332,12 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
         write_only=True,
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Logo-only multipart PATCH/PUT often omits other fields; `name` must stay required on create.
+        if self.instance is not None:
+            self.fields["name"].required = False
+
     class Meta:
         model = Company
         fields = [
