@@ -103,12 +103,12 @@ API_GROUPS = [
     },
     {
         "id": "employer",
-        "title": "Employer (auth: X-Employer-Key = EMPLOYER_POST_SECRET, or Django session user in Employer group)",
+        "title": "Employer APIs (auth: X-Employer-Key = EMPLOYER_POST_SECRET, or Employer session)",
         "endpoints": [
             {
                 "methods": ["GET", "POST"],
                 "path": "/api/employer/companies",
-                "description": "List companies (?search=, ?external_user_id=); POST create (JSON or multipart/form-data; file field logo_upload for logo image).",
+                "description": "List companies (?search=, ?external_user_id=); POST create (JSON or multipart/form-data; file field employer_logo for logo image).",
             },
             {
                 "methods": ["GET"],
@@ -116,9 +116,9 @@ API_GROUPS = [
                 "description": "Companies for a Breneo user (?external_user_id= required).",
             },
             {
-                "methods": ["GET", "PUT", "PATCH"],
+                "methods": ["GET", "PUT", "PATCH", "DELETE"],
                 "path": "/api/employer/companies/{company_id}",
-                "description": "Company by id; optional ?external_user_id=. GET logo is resolved URL (upload > logo field > fallback). PUT/PATCH: JSON or multipart; logo_upload=file for image.",
+                "description": "Company profile by id; optional ?external_user_id=. GET returns employer_logo URL (or null). PUT/PATCH: JSON or multipart with employer_logo=file. DELETE removes current employer_logo.",
             },
             {
                 "methods": ["POST", "DELETE"],

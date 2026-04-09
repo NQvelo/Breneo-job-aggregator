@@ -308,7 +308,13 @@ class EmployerCompanyDetailView(APIView):
 
         ser = EmployerCompanyWriteSerializer(company, data=request.data, partial=False)
         ser.is_valid(raise_exception=True)
-        updated = ser.save()
+        try:
+            updated = ser.save()
+        except Exception as exc:
+            return Response(
+                {"error": "Failed to save company profile image", "details": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         updated = Company.objects.prefetch_related("industries", "staff_memberships").get(
             pk=updated.pk
         )
@@ -325,10 +331,42 @@ class EmployerCompanyDetailView(APIView):
 
         ser = EmployerCompanyWriteSerializer(company, data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
-        updated = ser.save()
+        try:
+            updated = ser.save()
+        except Exception as exc:
+            return Response(
+                {"error": "Failed to save company profile image", "details": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         updated = Company.objects.prefetch_related("industries", "staff_memberships").get(
             pk=updated.pk
         )
         return Response(
             CompanyDetailSerializer(updated, context={"request": request}).data
+        )
+
+    def delete(self, request, company_id: int):
+        company = _employer_company_by_id(company_id)
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not _staff_scoped_access(request, company):
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not company.employer_logo:
+            return Response(
+                {"success": True, "employer_logo": None, "message": "No employer_logo to delete."},
+                status=status.HTTP_200_OK,
+            )
+        try:
+            company.employer_logo.delete(save=False)
+            company.employer_logo = None
+            company.save(update_fields=["employer_logo", "updated_at"])
+        except Exception as exc:
+            return Response(
+                {"error": "Failed to delete company profile image", "details": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(
+            {"success": True, "employer_logo": None, "message": "Employer logo deleted."},
+            status=status.HTTP_200_OK,
         )

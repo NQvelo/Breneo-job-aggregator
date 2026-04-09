@@ -80,6 +80,10 @@ if _CLOUDINARY_NAME:
         "API_KEY": os.environ.get("CLOUDINARY_API_KEY", ""),
         "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET", ""),
     }
+    CLOUDINARY_URL = (
+        f"cloudinary://{CLOUDINARY_STORAGE['API_KEY']}:"
+        f"{CLOUDINARY_STORAGE['API_SECRET']}@{CLOUDINARY_STORAGE['CLOUD_NAME']}"
+    )
     DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # ---------------------------

@@ -13,6 +13,11 @@ def resolved_company_logo_url(company, request=None) -> str:
     """
     from jobs.fetchers import get_logo_url
 
+    if getattr(company, "employer_logo", None) and company.employer_logo:
+        url = company.employer_logo.url
+        if request is not None and url.startswith("/"):
+            return request.build_absolute_uri(url)
+        return url
     if getattr(company, "logo_upload", None) and company.logo_upload:
         url = company.logo_upload.url
         if request is not None and url.startswith("/"):

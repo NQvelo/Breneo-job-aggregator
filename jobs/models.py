@@ -1,5 +1,6 @@
 from django.db import models
 import logging
+from cloudinary_storage.storage import MediaCloudinaryStorage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,13 @@ class Company(models.Model):
         blank=True,
         null=True,
         help_text="Uploaded company logo (multipart field name: logo_upload)",
+    )
+    employer_logo = models.ImageField(
+        storage=MediaCloudinaryStorage(),
+        upload_to="employer_logos/",
+        blank=True,
+        null=True,
+        help_text="Uploaded employer profile logo (multipart field name: employer_logo)",
     )
 
     # Primary ATS platform (greenhouse, lever, ashby, etc.)

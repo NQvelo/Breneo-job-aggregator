@@ -114,13 +114,14 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
 class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     """Serializer for company information nested within job responses"""
     logo = serializers.SerializerMethodField()
+    employer_logo = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
     staff_user_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
         fields = [
-            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'id', 'name', 'domain', 'logo', 'employer_logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
             'industries', 'company_email', 'staff_user_ids', 'employer_created',
         ]
@@ -133,6 +134,14 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         from jobs.logo_url import resolved_company_logo_url
 
         return resolved_company_logo_url(obj, self.context.get("request"))
+
+    def get_employer_logo(self, obj):
+        if not getattr(obj, "employer_logo", None):
+            return None
+        url = obj.employer_logo.url
+        if self.context.get("request") is not None and url.startswith("/"):
+            return self.context["request"].build_absolute_uri(url)
+        return url
     
     def to_representation(self, instance):
         """Ensure None values are handled properly"""
@@ -177,6 +186,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
 class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     """Serializer for company details with all fields"""
     logo = serializers.SerializerMethodField()
+    employer_logo = serializers.SerializerMethodField()
     job_count = serializers.SerializerMethodField()
     industries = IndustrySerializer(many=True, read_only=True)
     staff_user_ids = serializers.SerializerMethodField()
@@ -184,7 +194,7 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = Company
         fields = [
-            'id', 'name', 'domain', 'logo', 'platform', 'description', 'website',
+            'id', 'name', 'domain', 'logo', 'employer_logo', 'platform', 'description', 'website',
             'founded_date', 'employees_count', 'social_links', 'additional_details',
             'industries', 'company_email', 'staff_user_ids',
             'created_at', 'updated_at', 'job_count', 'employer_created',
@@ -198,6 +208,14 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
         from jobs.logo_url import resolved_company_logo_url
 
         return resolved_company_logo_url(obj, self.context.get("request"))
+
+    def get_employer_logo(self, obj):
+        if not getattr(obj, "employer_logo", None):
+            return None
+        url = obj.employer_logo.url
+        if self.context.get("request") is not None and url.startswith("/"):
+            return self.context["request"].build_absolute_uri(url)
+        return url
     
     def get_job_count(self, obj):
         """Get count of active jobs for this company"""
@@ -314,11 +332,11 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
 class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
     """Create/update company via employer API. Staff links: POST/PATCH /api/employer/staff-memberships/."""
 
-    logo_upload = serializers.ImageField(
+    employer_logo = serializers.ImageField(
         required=False,
         allow_null=True,
         write_only=True,
-        help_text="Multipart file field; use multipart/form-data with JSON fields as form parts.",
+        help_text="Multipart file field; use multipart/form-data with input key employer_logo.",
     )
 
     industry_ids = serializers.ListField(
@@ -352,10 +370,18 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
             "social_links",
             "additional_details",
             "company_email",
-            "logo_upload",
+            "employer_logo",
             "industry_ids",
             "industry_names",
         ]
+
+    def validate_employer_logo(self, value):
+        if value is None:
+            return value
+        max_bytes = 5 * 1024 * 1024
+        if getattr(value, "size", 0) > max_bytes:
+            raise serializers.ValidationError("Image must be <= 5MB.")
+        return value
 
     @staticmethod
     def _apply_industries(company: Company, ids: list[int] | None, names: list[str] | None) -> None:
@@ -382,9 +408,11 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
         return company
 
     def update(self, instance, validated_data):
-        if validated_data.get("logo_upload"):
-            if instance.logo_upload:
-                instance.logo_upload.delete(save=False)
+        if "employer_logo" in validated_data:
+            incoming_logo = validated_data.get("employer_logo")
+            if instance.employer_logo:
+                instance.employer_logo.delete(save=False)
+            validated_data["employer_logo"] = incoming_logo or None
         industry_ids = validated_data.pop("industry_ids", serializers.empty)
         industry_names = validated_data.pop("industry_names", serializers.empty)
         company = super().update(instance, validated_data)
