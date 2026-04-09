@@ -1,4 +1,6 @@
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import URLValidator
 from rest_framework import serializers
 from .models import (
     Job,
@@ -138,12 +140,18 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
     def get_logo_upload(self, obj):
         if not getattr(obj, "logo_upload", None):
             return None
-        url = obj.logo_upload.url
-        if url.startswith("/media/") or "/media/employer_logos/" in url:
+        try:
+            url = obj.logo_upload.url
+        except ValueError:
             return None
-        if self.context.get("request") is not None and url.startswith("/"):
-            return self.context["request"].build_absolute_uri(url)
-        return url
+        if not url:
+            return None
+        if url.startswith(("http://", "https://")):
+            return url
+        req = self.context.get("request")
+        if req is not None and url.startswith("/"):
+            return req.build_absolute_uri(url)
+        return url or None
 
     def to_representation(self, instance):
         """Ensure None values are handled properly"""
@@ -214,12 +222,18 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
     def get_logo_upload(self, obj):
         if not getattr(obj, "logo_upload", None):
             return None
-        url = obj.logo_upload.url
-        if url.startswith("/media/") or "/media/employer_logos/" in url:
+        try:
+            url = obj.logo_upload.url
+        except ValueError:
             return None
-        if self.context.get("request") is not None and url.startswith("/"):
-            return self.context["request"].build_absolute_uri(url)
-        return url
+        if not url:
+            return None
+        if url.startswith(("http://", "https://")):
+            return url
+        req = self.context.get("request")
+        if req is not None and url.startswith("/"):
+            return req.build_absolute_uri(url)
+        return url or None
 
     def get_job_count(self, obj):
         """Get count of active jobs for this company"""
@@ -336,6 +350,15 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
 class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
     """Create/update company via employer API. Staff links: POST/PATCH /api/employer/staff-memberships/."""
 
+    # Override model URLField: multipart clients often send "null"/"" for logo and break strict URL validation.
+    logo = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=2048,
+        help_text="External logo URL (scraped/fetched). Omit or leave empty when using logo_upload file.",
+    )
+
     logo_upload = serializers.ImageField(
         required=False,
         allow_null=True,
@@ -359,6 +382,18 @@ class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
         # Logo-only multipart PATCH/PUT often omits other fields; `name` must stay required on create.
         if self.instance is not None:
             self.fields["name"].required = False
+
+    def validate_logo(self, value):
+        if value is None:
+            return None
+        s = str(value).strip()
+        if not s or s.lower() in ("null", "undefined", "none", "nan"):
+            return None
+        try:
+            URLValidator()(s)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError("Enter a valid URL.") from exc
+        return s
 
     class Meta:
         model = Company

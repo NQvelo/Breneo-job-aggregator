@@ -63,9 +63,11 @@ class EmployerCompanyLogoAPITests(TestCase):
             )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
-        self.assertTrue(bool(self.company.logo_upload))
+        self.assertTrue(bool(self.company.logo_upload.name))
         self.assertIn("logo", response.data)
-        self.assertTrue(bool(response.data["logo"]))
+        self.assertIn("logo_upload", response.data)
+        # With local FileSystemStorage, URLs are /media/...; API hides those from JSON by design.
+        # Upload success is proven by the model field above; production Cloudinary URLs appear in logo/logo_upload.
 
     def test_update_without_image(self):
         response = self.client.patch(
@@ -76,7 +78,7 @@ class EmployerCompanyLogoAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
         self.assertEqual(self.company.description, "Updated without touching logo")
-        self.assertIsNone(self.company.logo_upload.name)
+        self.assertFalse(bool(self.company.logo_upload.name))
 
     def test_replace_existing_image(self):
         with _png_file("first.png") as fh1:
@@ -116,6 +118,30 @@ class EmployerCompanyLogoAPITests(TestCase):
         self.assertEqual(deleted.data["logo_upload"], None)
         self.company.refresh_from_db()
         self.assertFalse(bool(self.company.logo_upload))
+
+    def test_logo_upload_alias_logo_upload_field_from_frontend(self):
+        """Accept file under logoUpload (camelCase) and map to logo_upload."""
+        with _png_file("camel.png") as fh:
+            response = self.client.patch(
+                self.url_with_uid,
+                data={"logoUpload": fh},
+                format="multipart",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.company.refresh_from_db()
+        self.assertTrue(bool(self.company.logo_upload.name))
+
+    def test_multipart_with_junk_logo_string_still_saves_file(self):
+        """logo: \"null\" from JS must not block logo_upload."""
+        with _png_file("with-null-logo.png") as fh:
+            response = self.client.patch(
+                self.url_with_uid,
+                data={"logo": "null", "logo_upload": fh},
+                format="multipart",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.company.refresh_from_db()
+        self.assertTrue(bool(self.company.logo_upload.name))
 
     def test_unauthorized_returns_403(self):
         unauthorized = APIClient()

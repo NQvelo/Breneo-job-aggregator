@@ -16,9 +16,8 @@ def resolved_company_logo_url(company, request=None) -> str:
     def _public_url_or_empty(url: str | None) -> str:
         if not url:
             return ""
-        # Never expose local media URLs in API responses.
-        if url.startswith("/media/") or "/media/employer_logos/" in url:
-            return ""
+        if url.startswith(("http://", "https://")):
+            return url
         if request is not None and url.startswith("/"):
             return request.build_absolute_uri(url)
         return url

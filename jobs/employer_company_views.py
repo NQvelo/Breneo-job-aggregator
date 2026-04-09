@@ -1,5 +1,6 @@
 """Employer-facing company + industry API (synced with breneo-api user ids)."""
 
+from django.http import QueryDict
 from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -13,6 +14,28 @@ from .serializers import (
     EmployerCompanyWriteSerializer,
     IndustrySerializer,
 )
+
+
+def _employer_company_write_data(request):
+    """
+    Normalize multipart uploads so the image always reaches the serializer as logo_upload.
+
+    Common frontend mistakes: file under logoUpload, file, image, or employer_logo instead of logo_upload.
+    """
+    files = getattr(request, "FILES", None)
+    if not files or files.get("logo_upload"):
+        return request.data
+    for alt in ("logoUpload", "employer_logo", "file", "image"):
+        if alt in files:
+            raw = request.data
+            if isinstance(raw, QueryDict):
+                payload = raw.copy()
+                payload.setlist("logo_upload", files.getlist(alt))
+                return payload
+            payload = dict(raw) if hasattr(raw, "keys") else {}
+            payload["logo_upload"] = files.get(alt)
+            return payload
+    return request.data
 
 
 class IndustryListView(APIView):
@@ -265,7 +288,7 @@ class EmployerCompanyListCreateView(APIView):
         )
 
     def post(self, request):
-        ser = EmployerCompanyWriteSerializer(data=request.data)
+        ser = EmployerCompanyWriteSerializer(data=_employer_company_write_data(request))
         ser.is_valid(raise_exception=True)
         company = ser.save()
         company = Company.objects.prefetch_related("industries", "staff_memberships").get(
@@ -306,7 +329,9 @@ class EmployerCompanyDetailView(APIView):
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        ser = EmployerCompanyWriteSerializer(company, data=request.data, partial=False)
+        ser = EmployerCompanyWriteSerializer(
+            company, data=_employer_company_write_data(request), partial=False
+        )
         ser.is_valid(raise_exception=True)
         try:
             updated = ser.save()
@@ -329,7 +354,9 @@ class EmployerCompanyDetailView(APIView):
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        ser = EmployerCompanyWriteSerializer(company, data=request.data, partial=True)
+        ser = EmployerCompanyWriteSerializer(
+            company, data=_employer_company_write_data(request), partial=True
+        )
         ser.is_valid(raise_exception=True)
         try:
             updated = ser.save()
