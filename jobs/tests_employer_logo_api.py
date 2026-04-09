@@ -27,14 +27,14 @@ class EmployerCompanyLogoAPITests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._tmp_media_dir = tempfile.mkdtemp(prefix="test-employer-logo-")
-        cls._original_storage = Company._meta.get_field("employer_logo").storage
-        Company._meta.get_field("employer_logo").storage = FileSystemStorage(
+        cls._original_storage = Company._meta.get_field("logo_upload").storage
+        Company._meta.get_field("logo_upload").storage = FileSystemStorage(
             location=cls._tmp_media_dir
         )
 
     @classmethod
     def tearDownClass(cls):
-        Company._meta.get_field("employer_logo").storage = cls._original_storage
+        Company._meta.get_field("logo_upload").storage = cls._original_storage
         shutil.rmtree(cls._tmp_media_dir, ignore_errors=True)
         super().tearDownClass()
 
@@ -58,14 +58,14 @@ class EmployerCompanyLogoAPITests(TestCase):
         with _png_file("upload.png") as fh:
             response = self.client.patch(
                 self.url_with_uid,
-                data={"employer_logo": fh},
+                data={"logo_upload": fh},
                 format="multipart",
             )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
-        self.assertTrue(bool(self.company.employer_logo))
-        self.assertIn("employer_logo", response.data)
-        self.assertTrue(bool(response.data["employer_logo"]))
+        self.assertTrue(bool(self.company.logo_upload))
+        self.assertIn("logo", response.data)
+        self.assertTrue(bool(response.data["logo"]))
 
     def test_update_without_image(self):
         response = self.client.patch(
@@ -76,35 +76,35 @@ class EmployerCompanyLogoAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
         self.assertEqual(self.company.description, "Updated without touching logo")
-        self.assertIsNone(self.company.employer_logo.name)
+        self.assertIsNone(self.company.logo_upload.name)
 
     def test_replace_existing_image(self):
         with _png_file("first.png") as fh1:
             first = self.client.patch(
                 self.url_with_uid,
-                data={"employer_logo": fh1},
+                data={"logo_upload": fh1},
                 format="multipart",
             )
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
-        first_name = self.company.employer_logo.name
+        first_name = self.company.logo_upload.name
 
         with _png_file("second.png") as fh2:
             second = self.client.patch(
                 self.url_with_uid,
-                data={"employer_logo": fh2},
+                data={"logo_upload": fh2},
                 format="multipart",
             )
         self.assertEqual(second.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
-        second_name = self.company.employer_logo.name
+        second_name = self.company.logo_upload.name
         self.assertNotEqual(first_name, second_name)
 
     def test_delete_existing_image(self):
         with _png_file("to-delete.png") as fh:
             uploaded = self.client.patch(
                 self.url_with_uid,
-                data={"employer_logo": fh},
+                data={"logo_upload": fh},
                 format="multipart",
             )
         self.assertEqual(uploaded.status_code, status.HTTP_200_OK)
@@ -113,9 +113,9 @@ class EmployerCompanyLogoAPITests(TestCase):
             self.url_with_uid,
         )
         self.assertEqual(deleted.status_code, status.HTTP_200_OK)
-        self.assertEqual(deleted.data["employer_logo"], None)
+        self.assertEqual(deleted.data["logo_upload"], None)
         self.company.refresh_from_db()
-        self.assertFalse(bool(self.company.employer_logo))
+        self.assertFalse(bool(self.company.logo_upload))
 
     def test_unauthorized_returns_403(self):
         unauthorized = APIClient()

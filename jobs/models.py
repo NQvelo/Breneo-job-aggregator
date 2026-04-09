@@ -78,13 +78,6 @@ class Company(models.Model):
         null=True,
         help_text="Uploaded company logo (multipart field name: logo_upload)",
     )
-    employer_logo = models.ImageField(
-        upload_to="employer_logos/",
-        blank=True,
-        null=True,
-        help_text="Uploaded employer profile logo (multipart field name: employer_logo)",
-    )
-
     # Primary ATS platform (greenhouse, lever, ashby, etc.)
     platform = models.CharField(
         max_length=100,

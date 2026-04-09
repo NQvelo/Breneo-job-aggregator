@@ -108,7 +108,7 @@ API_GROUPS = [
             {
                 "methods": ["GET", "POST"],
                 "path": "/api/employer/companies",
-                "description": "List companies (?search=, ?external_user_id=); POST create (JSON or multipart/form-data; file field employer_logo for logo image).",
+                "description": "List companies (?search=, ?external_user_id=); POST create (JSON or multipart/form-data; file field logo_upload for logo image).",
             },
             {
                 "methods": ["GET"],
@@ -118,7 +118,7 @@ API_GROUPS = [
             {
                 "methods": ["GET", "PUT", "PATCH", "DELETE"],
                 "path": "/api/employer/companies/{company_id}",
-                "description": "Company profile by id; optional ?external_user_id=. GET returns employer_logo URL (or null). PUT/PATCH: JSON or multipart with employer_logo=file. DELETE removes current employer_logo.",
+                "description": "Company profile by id; optional ?external_user_id=. GET returns resolved logo URL. PUT/PATCH: JSON or multipart with logo_upload=file. DELETE removes current uploaded logo.",
             },
             {
                 "methods": ["POST", "DELETE"],

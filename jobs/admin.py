@@ -33,7 +33,6 @@ class CompanyAdmin(admin.ModelAdmin):
                 "industries",
                 "company_email",
                 "logo",
-                "employer_logo",
                 "logo_upload",
                 "logo_display",
             )
@@ -59,11 +58,6 @@ class CompanyAdmin(admin.ModelAdmin):
 
     def logo_display(self, obj):
         """Display company logo as image in admin"""
-        if getattr(obj, "employer_logo", None) and obj.employer_logo:
-            return format_html(
-                '<img src="{}" style="max-width: 100px; max-height: 50px;" />',
-                obj.employer_logo.url,
-            )
         if getattr(obj, "logo_upload", None) and obj.logo_upload:
             return format_html(
                 '<img src="{}" style="max-width: 100px; max-height: 50px;" />',

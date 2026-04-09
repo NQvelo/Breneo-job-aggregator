@@ -352,21 +352,21 @@ class EmployerCompanyDetailView(APIView):
         if not _staff_scoped_access(request, company):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not company.employer_logo:
+        if not company.logo_upload:
             return Response(
-                {"success": True, "employer_logo": None, "message": "No employer_logo to delete."},
+                {"success": True, "logo_upload": None, "message": "No logo_upload to delete."},
                 status=status.HTTP_200_OK,
             )
         try:
-            company.employer_logo.delete(save=False)
-            company.employer_logo = None
-            company.save(update_fields=["employer_logo", "updated_at"])
+            company.logo_upload.delete(save=False)
+            company.logo_upload = None
+            company.save(update_fields=["logo_upload", "updated_at"])
         except Exception as exc:
             return Response(
                 {"error": "Failed to delete company profile image", "details": str(exc)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response(
-            {"success": True, "employer_logo": None, "message": "Employer logo deleted."},
+            {"success": True, "logo_upload": None, "message": "Company logo deleted."},
             status=status.HTTP_200_OK,
         )

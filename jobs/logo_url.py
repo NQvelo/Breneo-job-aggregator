@@ -23,8 +23,6 @@ def resolved_company_logo_url(company, request=None) -> str:
             return request.build_absolute_uri(url)
         return url
 
-    if getattr(company, "employer_logo", None) and company.employer_logo:
-        return _public_url_or_empty(company.employer_logo.url)
     if getattr(company, "logo_upload", None) and company.logo_upload:
         return _public_url_or_empty(company.logo_upload.url)
     if company.logo:
