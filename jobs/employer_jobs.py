@@ -62,7 +62,7 @@ def create_employer_job(
         "employer_submitted": {
             "title": title.strip(),
             "company": company_name,
-            "location": (location or "").strip(),
+            "city": (location or "").strip(),
             "work_mode": wm,
             "workplace_type": wt_display or None,
             "apply_url": apply_url or None,
@@ -177,8 +177,14 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
     submitted = raw.get("employer_submitted") if isinstance(raw.get("employer_submitted"), dict) else {}
     submitted["title"] = job.title
     submitted["company"] = job.company.name
-    submitted["location"] = job.location or ""
-    submitted["location_country"] = job.location_country or ""
+    submitted["city"] = job.location or ""
+    if job.location_country:
+        submitted["country"] = job.location_country
+    else:
+        submitted.pop("country", None)
+    # Remove legacy keys in case older payloads used them.
+    submitted.pop("location", None)
+    submitted.pop("location_country", None)
     submitted["work_mode"] = wm or job.work_mode
     submitted["workplace_type"] = job.workplace_type or None
     submitted["apply_url"] = job.apply_url

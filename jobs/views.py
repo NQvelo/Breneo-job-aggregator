@@ -34,14 +34,26 @@ def _to_employer_job_payload(data):
     Employer API naming:
     - city (instead of location)
     - country (instead of location_country)
+
+    Applied recursively so nested payloads (e.g. raw.employer_submitted) are normalized too.
+    If country is empty/null, omit it from output.
     """
     if isinstance(data, list):
         return [_to_employer_job_payload(item) for item in data]
     if not isinstance(data, dict):
         return data
-    payload = dict(data)
-    payload["city"] = payload.pop("location", None)
-    payload["country"] = payload.pop("location_country", None)
+
+    payload = {}
+    for key, value in data.items():
+        if key == "location":
+            payload["city"] = _to_employer_job_payload(value)
+            continue
+        if key == "location_country":
+            normalized = _to_employer_job_payload(value)
+            if normalized not in (None, ""):
+                payload["country"] = normalized
+            continue
+        payload[key] = _to_employer_job_payload(value)
     return payload
 
 class JobsGroupedByCompany(APIView):
