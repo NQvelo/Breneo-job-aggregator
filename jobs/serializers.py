@@ -259,7 +259,6 @@ class EmployerJobCreateSerializer(serializers.Serializer):
     company = serializers.CharField(max_length=200)
     location = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
     city = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    Country = serializers.CharField(max_length=100, required=False, allow_blank=True)
     work_mode = serializers.ChoiceField(
         choices=["remote", "hybrid", "onsite", "on-site", "unknown"],
     )
@@ -267,14 +266,6 @@ class EmployerJobCreateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(default=True)
     full_description = serializers.CharField()
     salary = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
-
-    def validate(self, attrs):
-        # Preferred employer API aliases
-        if "city" in attrs:
-            attrs["location"] = attrs.get("city", "")
-        if "Country" in attrs and "location_country" not in attrs:
-            attrs["location_country"] = attrs.get("Country", "")
-        return attrs
 
 
 class EmployerJobUpdateSerializer(serializers.Serializer):
@@ -285,7 +276,7 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
     location = serializers.CharField(max_length=200, required=False, allow_blank=True)
     city = serializers.CharField(max_length=200, required=False, allow_blank=True)
     location_country = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    Country = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    country = serializers.CharField(max_length=100, required=False, allow_blank=True)
     workplace_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
     work_mode = serializers.ChoiceField(
         choices=["remote", "hybrid", "onsite", "on-site", "unknown"],
@@ -323,14 +314,6 @@ class EmployerJobUpdateSerializer(serializers.Serializer):
         choices=[c[0] for c in WORK_AUTH_CHOICES],
         required=False,
     )
-
-    def validate(self, attrs):
-        # Allow frontend to edit with city/Country labels.
-        if "city" in attrs:
-            attrs["location"] = attrs.get("city")
-        if "Country" in attrs:
-            attrs["location_country"] = attrs.get("Country")
-        return attrs
 
 
 class EmployerCompanyWriteSerializer(serializers.ModelSerializer):
