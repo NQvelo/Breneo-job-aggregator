@@ -28,6 +28,20 @@ from .serializers import (
 from .permissions import CanPostEmployerJob
 from .employer_jobs import create_employer_job, get_employer_job_or_none, update_employer_job
 
+
+def _map_employer_job_field_names(payload):
+    """Expose employer-facing names: city and Country."""
+    if isinstance(payload, list):
+        return [_map_employer_job_field_names(item) for item in payload]
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out["city"] = out.get("location")
+    out["Country"] = out.get("location_country")
+    out.pop("location", None)
+    out.pop("location_country", None)
+    return out
+
 class JobsGroupedByCompany(APIView):
     """
     Returns jobs grouped by company.
@@ -47,7 +61,7 @@ class JobsGroupedByCompany(APIView):
         serializer = CompanyJobsSerializer(
             companies, many=True, context={"request": request}
         )
-        return Response(serializer.data)
+        return Response(_map_employer_job_field_names(serializer.data))
 
 
 def _get_multi_value_param(request, key, split_comma=True):
@@ -557,8 +571,12 @@ class EmployerJobCreateView(APIView):
             apply_url=data.get("apply_url") or None,
             is_active=data.get("is_active", True),
         )
+        if "location_country" in data:
+            lc = (data.get("location_country") or "").strip()
+            job.location_country = lc or None
+            job.save(update_fields=["location_country"])
         out = NestedJobSerializer(job, context={"request": request}).data
-        return Response(out, status=status.HTTP_201_CREATED)
+        return Response(_map_employer_job_field_names(out), status=status.HTTP_201_CREATED)
 
 
 def _resolve_employer_job(request, job_id: int):
@@ -602,7 +620,9 @@ class EmployerJobDetailView(APIView):
             return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(
-            NestedJobSerializer(job, context={"request": request}).data
+            _map_employer_job_field_names(
+                NestedJobSerializer(job, context={"request": request}).data
+            )
         )
 
     def _update(self, request, job_id: int):
@@ -625,7 +645,9 @@ class EmployerJobDetailView(APIView):
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
-            NestedJobSerializer(updated, context={"request": request}).data,
+            _map_employer_job_field_names(
+                NestedJobSerializer(updated, context={"request": request}).data
+            ),
             status=status.HTTP_200_OK,
         )
 
