@@ -534,7 +534,11 @@ class Job(models.Model):
                 self.languages_required = norm.get("languages_required") or []
                 self.embedding_text = norm.get("embedding_text")
                 self.data_completeness_score = norm.get("data_completeness_score", 0)
-                self.location_country = norm.get("location_country")
+                if norm.get("canonical_location") is not None:
+                    self.location = norm["canonical_location"]
+                _lc = norm.get("location_country")
+                if _lc is not None:
+                    self.location_country = _lc
                 # Keep visa/auth from matching_normalizer if needed (job_normalizer doesn't extract these)
                 from .matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
                 self.visa_sponsorship = extract_visa_sponsorship(self.description) or "unknown"

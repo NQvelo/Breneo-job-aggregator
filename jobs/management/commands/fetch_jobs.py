@@ -6,7 +6,7 @@ from django.conf import settings as django_settings
 from jobs.models import Company, Job
 from jobs.utils import parse_date, process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import parse_job_posting_for_db
-from jobs.job_normalizer import normalize_job_fields
+from jobs.job_normalizer import normalize_job_fields, parse_stored_location_fields
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
@@ -203,15 +203,19 @@ class Command(BaseCommand):
                     # Parse posted_at only when fetcher provided it; avoid overwriting with None
                     raw_posted = j.get("posted_at")
                     parsed_posted = parse_date(raw_posted) if raw_posted else None
+                    raw_location = j.get("location")
+                    ploc, pcountry = parse_stored_location_fields(raw_location)
                     defaults = {
                         "title": j.get("title") or "",
                         "company": company_obj,
-                        "location": j.get("location"),
+                        "location": ploc if ploc is not None else raw_location,
                         "description": j.get("description"),
                         "apply_url": j.get("apply_url") or ext_id,
                         "raw": j.get("raw") or {},
                         "is_active": True,
                     }
+                    if pcountry is not None:
+                        defaults["location_country"] = pcountry
                     if parsed_posted is not None:
                         defaults["posted_at"] = parsed_posted
 
@@ -249,7 +253,9 @@ class Command(BaseCommand):
                     # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary, workplace_type, skills_required)
                     if job_obj.description:
                         try:
-                            parsed = parse_job_posting_for_db(job_obj.description, location=job_obj.location or "")
+                            parsed = parse_job_posting_for_db(
+                                job_obj.description, location=(raw_location or job_obj.location or "")
+                            )
                             updated = False
                             if parsed.get("responsibilities"):
                                 job_obj.responsibilities = parsed["responsibilities"]
@@ -309,7 +315,7 @@ class Command(BaseCommand):
                             norm = normalize_job_fields(
                                 title=job_obj.title,
                                 description_raw=job_obj.description,
-                                location=job_obj.location,
+                                location=raw_location or job_obj.location,
                                 qualifications_text=job_obj.qualifications,
                             )
                             job_obj.work_mode = norm.get("work_mode", "unknown")
@@ -323,17 +329,25 @@ class Command(BaseCommand):
                             job_obj.languages_required = norm.get("languages_required") or []
                             job_obj.embedding_text = norm.get("embedding_text")
                             job_obj.data_completeness_score = norm.get("data_completeness_score", 0)
-                            job_obj.location_country = norm.get("location_country")
+                            if norm.get("canonical_location") is not None:
+                                job_obj.location = norm["canonical_location"]
+                            if norm.get("location_country") is not None:
+                                job_obj.location_country = norm["location_country"]
                             job_obj.visa_sponsorship = extract_visa_sponsorship(job_obj.description) or "unknown"
                             job_obj.work_authorization_required = extract_work_authorization_required(job_obj.description) or "unknown"
                             _compute_industry_tags(job_obj, j, created, logger)
-                            job_obj.save(update_fields=[
+                            match_fields = [
                                 "work_mode", "seniority", "role_category", "min_years_experience",
                                 "skills_required", "skills_preferred", "tech_stack", "tech_stack_candidates",
                                 "languages_required", "embedding_text", "data_completeness_score",
-                                "location_country", "visa_sponsorship", "work_authorization_required",
+                                "visa_sponsorship", "work_authorization_required",
                                 "industry_tags",
-                            ])
+                            ]
+                            if norm.get("canonical_location") is not None:
+                                match_fields.append("location")
+                            if norm.get("location_country") is not None:
+                                match_fields.append("location_country")
+                            job_obj.save(update_fields=match_fields)
                         except Exception as e:
                             logger.warning(f"Matching fields normalizer failed for {job_obj.title}: {e}")
                     else:

@@ -79,7 +79,10 @@ class Command(BaseCommand):
                 job.languages_required = norm.get("languages_required") or []
                 job.embedding_text = norm.get("embedding_text")
                 job.data_completeness_score = norm.get("data_completeness_score", 0)
-                job.location_country = norm.get("location_country")
+                if norm.get("canonical_location") is not None:
+                    job.location = norm["canonical_location"]
+                if norm.get("location_country") is not None:
+                    job.location_country = norm["location_country"]
                 job.visa_sponsorship = extract_visa_sponsorship(job.description) or "unknown"
                 job.work_authorization_required = extract_work_authorization_required(job.description) or "unknown"
 

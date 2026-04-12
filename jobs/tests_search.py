@@ -109,3 +109,20 @@ class JobSearchTwoCountriesTests(TestCase):
         titles = {r["title"] for r in results}
         self.assertIn("Engineer in US", titles)
         self.assertIn("Developer in UK", titles)
+
+    def test_city_filter_matches_job_location_only(self):
+        """`city` filters Job.location (API city), not location_country."""
+        url = reverse("job_search")
+        response = self.client.get(url, {"city": "Paris"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
+        results = response.data.get("results", [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "Dev in France")
+        self.assertEqual(response.data.get("filters", {}).get("city"), ["Paris"])
+
+    def test_city_without_country_still_narrow(self):
+        response = self.client.get(reverse("job_search"), {"city": "London"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "Developer in UK")

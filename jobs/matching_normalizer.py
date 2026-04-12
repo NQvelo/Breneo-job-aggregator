@@ -287,6 +287,9 @@ def parse_location_country(location: str | None) -> str | None:
     for pattern, country in _COUNTRY_PATTERNS:
         if country and re.search(pattern, loc, re.IGNORECASE):
             return country
+    tail = loc.rsplit(",", 1)[-1].strip() if "," in loc else loc
+    if re.fullmatch(r"(?i)england|scotland|wales|northern ireland", tail):
+        return "United Kingdom"
     return None
 
 

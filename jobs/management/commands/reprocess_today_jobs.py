@@ -94,33 +94,38 @@ class Command(BaseCommand):
                 job.languages_required = norm.get("languages_required") or []
                 job.embedding_text = norm.get("embedding_text")
                 job.data_completeness_score = norm.get("data_completeness_score", 0)
-                job.location_country = norm.get("location_country")
+                if norm.get("canonical_location") is not None:
+                    job.location = norm["canonical_location"]
+                if norm.get("location_country") is not None:
+                    job.location_country = norm["location_country"]
                 job.visa_sponsorship = extract_visa_sponsorship(job.description) or "unknown"
                 job.work_authorization_required = extract_work_authorization_required(job.description) or "unknown"
 
-                job.save(
-                    update_fields=[
-                        "responsibilities",
-                        "qualifications",
-                        "workplace_type",
-                        "skills_required",
-                        "benefits",
-                        "structured_description",
-                        "work_mode",
-                        "seniority",
-                        "role_category",
-                        "min_years_experience",
-                        "skills_preferred",
-                        "tech_stack",
-                        "tech_stack_candidates",
-                        "languages_required",
-                        "embedding_text",
-                        "data_completeness_score",
-                        "location_country",
-                        "visa_sponsorship",
-                        "work_authorization_required",
-                    ]
-                )
+                _fields = [
+                    "responsibilities",
+                    "qualifications",
+                    "workplace_type",
+                    "skills_required",
+                    "benefits",
+                    "structured_description",
+                    "work_mode",
+                    "seniority",
+                    "role_category",
+                    "min_years_experience",
+                    "skills_preferred",
+                    "tech_stack",
+                    "tech_stack_candidates",
+                    "languages_required",
+                    "embedding_text",
+                    "data_completeness_score",
+                    "visa_sponsorship",
+                    "work_authorization_required",
+                ]
+                if norm.get("canonical_location") is not None:
+                    _fields.append("location")
+                if norm.get("location_country") is not None:
+                    _fields.append("location_country")
+                job.save(update_fields=_fields)
                 updated += 1
                 self.stdout.write(f"  ✓ {job.title} @ {job.company.name}")
 

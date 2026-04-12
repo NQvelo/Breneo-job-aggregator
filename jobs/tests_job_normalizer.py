@@ -12,6 +12,7 @@ from jobs.job_normalizer import (
     extract_seniority,
     infer_role_category,
     normalize_job_fields,
+    parse_stored_location_fields,
     get_skill_alias_index,
 )
 
@@ -316,7 +317,56 @@ class TestNormalizeJobFields(unittest.TestCase):
         self.assertIn("Django", r["skills_required"])
         self.assertIn("GraphQL", r["skills_preferred"])
         self.assertEqual(r["location_country"], "Germany")
+        self.assertEqual(r.get("canonical_location"), "Berlin")
         self.assertGreater(r["data_completeness_score"], 0)
+
+
+class TestParseStoredLocationFields(unittest.TestCase):
+    def test_multi_us_cities_semicolon(self):
+        city, country = parse_stored_location_fields("Chicago, IL; New York, NY")
+        self.assertEqual(city, "Chicago")
+        self.assertEqual(country, "USA")
+
+    def test_single_us_city_state(self):
+        self.assertEqual(
+            parse_stored_location_fields("San Francisco, CA"),
+            ("San Francisco", "USA"),
+        )
+
+    def test_canada_province(self):
+        self.assertEqual(
+            parse_stored_location_fields("Toronto, ON"),
+            ("Toronto", "Canada"),
+        )
+
+    def test_europe_city_country(self):
+        self.assertEqual(
+            parse_stored_location_fields("Berlin, Germany"),
+            ("Berlin", "Germany"),
+        )
+
+    def test_london_england_to_uk(self):
+        self.assertEqual(
+            parse_stored_location_fields("London, England"),
+            ("London", "United Kingdom"),
+        )
+
+    def test_edinburgh_scotland(self):
+        self.assertEqual(
+            parse_stored_location_fields("Edinburgh, Scotland"),
+            ("Edinburgh", "United Kingdom"),
+        )
+
+    def test_new_england_region_not_uk_country(self):
+        """Regional phrase must not be parsed as country England."""
+        city, country = parse_stored_location_fields("Boston, New England")
+        self.assertEqual(city, "Boston, New England")
+        self.assertIsNone(country)
+
+    def test_empty(self):
+        self.assertEqual(parse_stored_location_fields(None), (None, None))
+        self.assertEqual(parse_stored_location_fields(""), (None, None))
+        self.assertEqual(parse_stored_location_fields("   "), (None, None))
 
 
 if __name__ == "__main__":

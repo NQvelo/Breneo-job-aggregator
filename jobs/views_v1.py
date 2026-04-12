@@ -66,8 +66,12 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         if company:
             queryset = queryset.filter(company__name__icontains=company)
 
+        # City maps to Job.location only (API field `city`). Prefer `city` over legacy `location`.
+        city = self.request.query_params.get('city')
         location = self.request.query_params.get('location')
-        if location:
+        if city:
+            queryset = queryset.filter(location__icontains=city)
+        elif location:
             queryset = queryset.filter(location__icontains=location)
 
         country = self.request.query_params.get('country')

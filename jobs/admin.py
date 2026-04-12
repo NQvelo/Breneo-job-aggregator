@@ -1,6 +1,17 @@
+from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
 from .models import Job, Company, CompanyStaffMembership, Industry
+
+
+class JobAdminForm(forms.ModelForm):
+    class Meta:
+        model = Job
+        fields = "__all__"
+        labels = {
+            "location": "City",
+            "location_country": "Country",
+        }
 
 
 @admin.register(CompanyStaffMembership)
@@ -76,11 +87,13 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
+    form = JobAdminForm
     list_display = (
         "title",
         "get_company_name",
         "description_short_display",
-        "location",
+        "city_display",
+        "country_display",
         "work_mode",
         "seniority",
         "platform",
@@ -121,6 +134,18 @@ class JobAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ("fetched_at",)
+
+    def city_display(self, obj):
+        return obj.location or "-"
+
+    city_display.short_description = "City"
+    city_display.admin_order_field = "location"
+
+    def country_display(self, obj):
+        return obj.location_country or "-"
+
+    country_display.short_description = "Country"
+    country_display.admin_order_field = "location_country"
     
     def get_company_name(self, obj):
         return obj.company.name if obj.company else "-"

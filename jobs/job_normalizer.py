@@ -361,7 +361,21 @@ def _extract_languages(description: str | None) -> list[str]:
     return found
 
 
-# --- Location country ---
+# --- Location: city (location field) + country ---
+_US_STATE_CODES = frozenset(
+    {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+    }
+)
+_CA_PROVINCE_CODES = frozenset(
+    {"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
+)
+
+
 def _parse_location_country(location: str | None) -> str | None:
     if not location or not location.strip():
         return None
@@ -382,7 +396,59 @@ def _parse_location_country(location: str | None) -> str | None:
     for pattern, country in patterns:
         if re.search(pattern, loc, re.IGNORECASE):
             return country
+    # UK constituent countries (e.g. "London, England") — use last comma segment or whole
+    # string so "New England" never matches as a bare "England" tail.
+    tail = loc.rsplit(",", 1)[-1].strip() if "," in loc else loc
+    if re.fullmatch(r"(?i)england|scotland|wales|northern ireland", tail):
+        return "United Kingdom"
     return None
+
+
+def parse_stored_location_fields(raw: str | None) -> tuple[str | None, str | None]:
+    """
+    Turn feed-style locations into DB fields: location (city/primary site) and country.
+
+    Multi-site strings (e.g. "Chicago, IL; New York, NY") use the first segment for
+    city/country so country filters and API `city`/`country` stay populated.
+    """
+    if raw is None:
+        return (None, None)
+    full = str(raw).strip()
+    if not full:
+        return (None, None)
+
+    segments = [s.strip() for s in re.split(r"\s*;\s*", full) if s.strip()]
+    primary = segments[0] if segments else full
+
+    country = _parse_location_country(primary) or _parse_location_country(full)
+    if country is None:
+        m = re.search(r",\s*([A-Z]{2})\s*$", primary)
+        if m:
+            code = m.group(1)
+            if code in _US_STATE_CODES:
+                country = "USA"
+            elif code in _CA_PROVINCE_CODES:
+                country = "Canada"
+
+    location_out = primary
+    if country == "USA":
+        m = re.match(r"^(.+?),\s*([A-Z]{2})\s*$", primary)
+        if m and m.group(2) in _US_STATE_CODES:
+            location_out = m.group(1).strip()
+    elif country == "Canada":
+        m = re.match(r"^(.+?),\s*([A-Z]{2})\s*$", primary)
+        if m and m.group(2) in _CA_PROVINCE_CODES:
+            location_out = m.group(1).strip()
+    elif country and "," in primary:
+        left, right = primary.rsplit(",", 1)
+        right_st = right.strip()
+        if _parse_location_country(right_st) == country:
+            location_out = left.strip()
+
+    if len(location_out) > 200:
+        location_out = location_out[:200]
+
+    return (location_out, country)
 
 
 # --- Data completeness score ---
@@ -430,6 +496,10 @@ def normalize_job_fields(
     desc = (description_raw or "") + "\n\n" + (qualifications_text or "")
     desc = desc.strip() or None
     combined = ((title or "") + "\n" + (desc or "")).strip()
+
+    loc_parsed, ctry_parsed = parse_stored_location_fields(location)
+    location_country_out = ctry_parsed or _parse_location_country(location)
+
     if not title and not desc:
         return {
             "work_mode": "unknown",
@@ -443,7 +513,8 @@ def normalize_job_fields(
             "languages_required": [],
             "embedding_text": None,
             "data_completeness_score": 0,
-            "location_country": _parse_location_country(location),
+            "location_country": location_country_out,
+            "canonical_location": loc_parsed,
             "used_fallback_sectioning": True,
         }
     skills_result = extract_skills(desc, title)
@@ -480,7 +551,8 @@ def normalize_job_fields(
         "languages_required": languages,
         "embedding_text": embedding_text,
         "data_completeness_score": score,
-        "location_country": _parse_location_country(location),
+        "location_country": location_country_out,
+        "canonical_location": loc_parsed,
         "used_fallback_sectioning": skills_result["usedFallbackSectioning"],
     }
 

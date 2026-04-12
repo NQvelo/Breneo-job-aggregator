@@ -115,6 +115,7 @@ class JobSearchView(APIView):
     - title_filter: Direct title filter string (Google-like syntax) (optional)
     - title: One or more title keywords, comma-separated; job matches if title contains ANY (e.g. title=Engineer,Developer)
     - country: One or more country codes, comma-separated (e.g. country=us,uk)
+    - city: One or more city strings, comma-separated; matches Job.location only (not country)
     - location_country: One or more location country names, comma-separated (e.g. location_country=USA,Germany)
     - role_category: One or more, comma-separated (e.g. role_category=frontend,backend,data)
     - work_mode: One or more, comma-separated (e.g. work_mode=remote,hybrid,onsite)
@@ -139,6 +140,7 @@ class JobSearchView(APIView):
 
         # Multi-value filters (list of values; job matches if it matches ANY)
         countries = _get_multi_value_param(request, 'country')
+        cities = _get_multi_value_param(request, 'city')
         location_countries = _get_multi_value_param(request, 'location_country')
         title_keywords = _get_multi_value_param(request, 'title')
         role_categories = _get_multi_value_param(request, 'role_category')
@@ -240,6 +242,13 @@ class JobSearchView(APIView):
                         country_q |= Q(location__icontains=v)
                         country_q |= Q(location_country__icontains=v)
             jobs = jobs.filter(country_q)
+
+        # City: Job.location only (matches API `city`); does not touch location_country
+        if cities:
+            city_q = Q()
+            for c in cities:
+                city_q |= Q(location__icontains=c)
+            jobs = jobs.filter(city_q)
         
         # Multi-value location_country (exact names, e.g. USA, Germany)
         if location_countries:
@@ -368,6 +377,7 @@ class JobSearchView(APIView):
                 'title_filter': parsed_title_filter if parsed_title_filter else None,
                 'title': title_keywords if title_keywords else None,
                 'country': countries if countries else None,
+                'city': cities if cities else None,
                 'location_country': location_countries if location_countries else None,
                 'role_category': role_categories if role_categories else None,
                 'work_mode': work_modes if work_modes else None,

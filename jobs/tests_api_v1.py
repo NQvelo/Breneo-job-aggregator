@@ -80,6 +80,19 @@ class APIV1TestCase(TestCase):
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['location'], 'San Francisco')
 
+    def test_filter_city_only_on_location_field(self):
+        url = reverse('job-list')
+        response = self.client.get(url, {'city': 'London'})
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], self.job3.id)
+
+    def test_filter_city_overrides_location_param(self):
+        """Explicit `city` wins; legacy `location` is ignored when both are sent."""
+        url = reverse('job-list')
+        response = self.client.get(url, {'city': 'Berlin', 'location': 'San'})
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], self.job1.id)
+
     def test_list_includes_city_and_country(self):
         url = reverse('job-list')
         response = self.client.get(url)
