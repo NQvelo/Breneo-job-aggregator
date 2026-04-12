@@ -24,9 +24,11 @@ from .serializers import (
     CompanyDetailSerializer,
     EmployerJobCreateSerializer,
     EmployerJobUpdateSerializer,
+    ParseJobDescriptionSerializer,
 )
 from .permissions import CanPostEmployerJob
 from .employer_jobs import create_employer_job, get_employer_job_or_none, update_employer_job
+from .gemini_job_parser import parse_job_description_with_gemini
 
 
 def _to_employer_job_payload(data):
@@ -532,6 +534,30 @@ class JobDetailsView(APIView):
         serializer = NestedJobSerializer(job, context={"request": request})
 
         return Response(serializer.data)
+
+
+class ParseJobDescriptionView(APIView):
+    """
+    POST /api/jobs/parse-description
+
+    Uses Gemini (GEMINI_API_KEY) to return responsibilities, qualifications, skills_required
+    as JSON arrays. Same authentication as other employer routes.
+
+    Request JSON: { "description": "...", "source": "employer_manual" }
+    Response: { "responsibilities": [...], "qualifications": [...], "skills_required": [...] }
+
+    If GEMINI_API_KEY is unset or the model fails, returns empty arrays (does not 500).
+    """
+
+    authentication_classes = []
+    permission_classes = [CanPostEmployerJob]
+
+    def post(self, request):
+        ser = ParseJobDescriptionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        description = ser.validated_data["description"]
+        result = parse_job_description_with_gemini(description)
+        return Response(result)
 
 
 class EmployerJobCreateView(APIView):

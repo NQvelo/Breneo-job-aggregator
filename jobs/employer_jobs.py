@@ -58,7 +58,7 @@ def create_employer_job(
     external_job_id = f"employer-{uuid.uuid4().hex}"
 
     raw: dict[str, Any] = {
-        "source": "employer",
+        "source": "employer_manual",
         "employer_submitted": {
             "title": title.strip(),
             "company": company_name,
@@ -86,6 +86,9 @@ def create_employer_job(
         raw=raw,
         salary=(salary or "").strip() or None,
     )
+    from .gemini_job_parser import maybe_parse_employer_description_with_gemini
+
+    maybe_parse_employer_description_with_gemini(job)
     job.save()
     return job
 
@@ -106,6 +109,8 @@ def _clean_str_list(val: Any) -> list[str]:
 
 
 def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
+    prev_desc = (job.description or "").strip()
+
     company_name = payload.get("company")
     if company_name is not None:
         company_name = str(company_name).strip()
@@ -132,16 +137,10 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
         job.is_active = bool(payload.get("is_active"))
     if "benefits" in payload:
         job.benefits = (payload.get("benefits") or "").strip() or None
-    if "responsibilities" in payload:
-        job.responsibilities = (payload.get("responsibilities") or "").strip() or None
-    if "qualifications" in payload:
-        job.qualifications = (payload.get("qualifications") or "").strip() or None
     if "industry_tags" in payload:
         job.industry_tags = (payload.get("industry_tags") or "").strip() or None
     if "posted_at" in payload:
         job.posted_at = payload.get("posted_at")
-    if "skills_required" in payload:
-        job.skills_required = _clean_str_list(payload.get("skills_required"))
     if "skills_preferred" in payload:
         job.skills_preferred = _clean_str_list(payload.get("skills_preferred"))
     if "seniority" in payload:
@@ -170,8 +169,24 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
         body_text = (payload.get("full_description") or "").strip()
     elif "description" in payload:
         body_text = (payload.get("description") or "").strip()
+
+    desc_changed = False
     if body_text is not None:
-        job.description = body_text
+        new_d = body_text.strip()
+        desc_changed = new_d != prev_desc
+        job.description = new_d
+
+    if body_text is not None and desc_changed and (job.description or "").strip():
+        from .gemini_job_parser import maybe_parse_employer_description_with_gemini
+
+        maybe_parse_employer_description_with_gemini(job)
+    else:
+        if "responsibilities" in payload:
+            job.responsibilities = (payload.get("responsibilities") or "").strip() or None
+        if "qualifications" in payload:
+            job.qualifications = (payload.get("qualifications") or "").strip() or None
+        if "skills_required" in payload:
+            job.skills_required = _clean_str_list(payload.get("skills_required"))
 
     raw = job.raw if isinstance(job.raw, dict) else {}
     submitted = raw.get("employer_submitted") if isinstance(raw.get("employer_submitted"), dict) else {}
@@ -202,7 +217,7 @@ def update_employer_job(job: Job, payload: dict[str, Any]) -> Job:
     submitted["min_years_experience"] = job.min_years_experience
     submitted["visa_sponsorship"] = job.visa_sponsorship
     submitted["work_authorization_required"] = job.work_authorization_required
-    raw["source"] = "employer"
+    raw["source"] = "employer_manual"
     raw["employer_submitted"] = submitted
     raw["body"] = job.description or ""
     job.raw = raw

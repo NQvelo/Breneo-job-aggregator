@@ -8,6 +8,7 @@ from .views import (
     CompanyDetailView,
     EmployerJobCreateView,
     EmployerJobDetailView,
+    ParseJobDescriptionView,
     TriggerFetchView,
 )
 from .employer_company_views import (
@@ -50,6 +51,7 @@ urlpatterns = [
         EmployerCompanyDetailView.as_view(),
         name='employer_company_detail',
     ),
+    path('jobs/parse-description', ParseJobDescriptionView.as_view(), name='parse_job_description'),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
     path('employer/jobs/<int:job_id>', EmployerJobDetailView.as_view(), name='employer_job_detail'),
     path('trigger-fetch', TriggerFetchView.as_view(), name='trigger_fetch'),  # /api/trigger-fetch (for external cron)

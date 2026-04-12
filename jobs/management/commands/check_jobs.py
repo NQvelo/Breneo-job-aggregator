@@ -42,7 +42,9 @@ PLATFORM_TO_FETCHER = {
     "greenhouse": fetchers.fetch_greenhouse,
     "lever": fetchers.fetch_lever,
     "workable": fetchers.fetch_workable,
-    "smartrecruiters": fetchers.fetch_smartrecruiters if hasattr(fetchers, "fetch_smartrecruiters") else None,
+    "smartrecruiters": fetchers.fetch_smartrecruiters,
+    "remotive": fetchers.fetch_remotive,
+    "adzuna": fetchers.fetch_adzuna,
     "rss": fetchers.fetch_rss,
     "jobs.ge": fetchers.fetch_jobs_ge_listings,
     "career_page": fetchers.fetch_generic_career_page,
@@ -70,7 +72,18 @@ class Command(BaseCommand):
                 continue
 
             # call fetcher with proper args
-            if platform in ("greenhouse", "lever", "workable", "smartrecruiters"):
+            if platform == "smartrecruiters":
+                jobs_data = fetcher(
+                    comp.get("handle"),
+                    company_name,
+                    comp.get("logo"),
+                    remote_only=comp.get("remote_only", True),
+                )
+            elif platform == "remotive":
+                jobs_data = fetcher(comp.get("url"), company_name, comp.get("logo"))
+            elif platform == "adzuna":
+                jobs_data = fetcher(company_name, comp.get("handle") or "remote", comp.get("logo"))
+            elif platform in ("greenhouse", "lever", "workable"):
                 jobs_data = fetcher(comp.get("handle"), company_name, comp.get("logo"))
             else:
                 jobs_data = fetcher(comp.get("url") or comp.get("handle"), company_name, comp.get("logo"))

@@ -16,6 +16,11 @@ CORS_ALLOW_ALL_ORIGINS = True
 LINKEDIN_JOBS_API_URL = os.environ.get("LINKEDIN_JOBS_API_URL", "")
 LINKEDIN_JOBS_API_KEY = os.environ.get("LINKEDIN_JOBS_API_KEY", "")
 
+# Optional: Adzuna job search API (https://developer.adzuna.com/) — remote-friendly queries
+ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
+ADZUNA_COUNTRY = os.environ.get("ADZUNA_COUNTRY", "gb")
+
 # ---------------------------
 # SECURITY
 # ---------------------------
@@ -293,3 +298,11 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Gemini (employer job description parsing — backend only). Set the key in the environment, e.g.:
+#   export GEMINI_API_KEY="your-key"          # local shell
+#   Railway/Render: add GEMINI_API_KEY in the service Variables / Secrets UI
+# Do not commit real keys into the repo.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBHFY3nND2LGiqUgI3GxGCNFRh24gXCR8E").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
+GEMINI_TIMEOUT_SECONDS = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "90") or "90")

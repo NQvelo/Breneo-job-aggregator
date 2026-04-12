@@ -323,7 +323,7 @@ class Job(models.Model):
         help_text="Benefits section from job posting, if available"
     )
     
-    apply_url = models.URLField(blank=True, null=True)
+    apply_url = models.URLField(max_length=2048, blank=True, null=True)
 
     # Compensation as free text (ranges, hourly, equity, etc.)
     salary = models.CharField(
@@ -409,7 +409,8 @@ class Job(models.Model):
                 if parsed_date:
                     self.posted_at = parsed_date
         
-        # Parse job posting (robust parser) for responsibilities, qualifications, summary, workplace_type, skills_required
+        # Parse job posting (robust parser) for responsibilities, qualifications, summary, workplace_type, skills_required.
+        # Employer-manual jobs: Gemini runs in employer_jobs first; this block only fills gaps (e.g. no GEMINI_API_KEY).
         if self.description and (
             not self.responsibilities or not self.qualifications
             or not self.workplace_type or not self.skills_required
@@ -450,9 +451,9 @@ class Job(models.Model):
                         extracted = extract_workplace_type_and_skills(
                             self.description, self.location or ""
                         )
-                        if extracted.get("workplace_type"):
+                        if extracted.get("workplace_type") and not self.workplace_type:
                             self.workplace_type = extracted["workplace_type"]
-                        if extracted.get("skills_required"):
+                        if extracted.get("skills_required") and not self.skills_required:
                             self.skills_required = extracted["skills_required"]
                     except Exception as e3:
                         logger.warning(f"Workplace/skills extraction failed: {e3}")
@@ -527,7 +528,9 @@ class Job(models.Model):
                 self.seniority = norm.get("seniority", "unknown")
                 self.role_category = norm.get("role_category")
                 self.min_years_experience = norm.get("min_years_experience")
-                self.skills_required = norm.get("skills_required") or []
+                # Fetched jobs: infer skills from catalog. Employer posts: only Gemini / heuristic parser / manual.
+                if self.platform != "employer":
+                    self.skills_required = norm.get("skills_required") or []
                 self.skills_preferred = norm.get("skills_preferred") or []
                 self.tech_stack = norm.get("tech_stack") or []
                 self.tech_stack_candidates = norm.get("tech_stack_candidates") or []
@@ -547,7 +550,7 @@ class Job(models.Model):
                 logger.warning(f"Job normalizer failed: {e}")
 
         # Employer-posted jobs: preserve submitted work mode / workplace label (NLP must not override)
-        if self.raw and isinstance(self.raw, dict) and self.raw.get("source") == "employer":
+        if self.raw and isinstance(self.raw, dict) and self.raw.get("source") in ("employer", "employer_manual"):
             submitted = self.raw.get("employer_submitted") or {}
             wm = submitted.get("work_mode")
             valid_wm = {c[0] for c in WORK_MODE_CHOICES}

@@ -286,6 +286,19 @@ class EmployerJobCreateSerializer(serializers.Serializer):
     salary = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
 
 
+class ParseJobDescriptionSerializer(serializers.Serializer):
+    """
+    POST /api/jobs/parse-description — Gemini parses employer-entered description text.
+    `source` must be employer_manual (blocks accidental use for non-manual flows).
+    """
+
+    description = serializers.CharField(min_length=1, max_length=500_000, trim_whitespace=True)
+    source = serializers.ChoiceField(
+        choices=["employer_manual"],
+        default="employer_manual",
+    )
+
+
 class EmployerJobUpdateSerializer(serializers.Serializer):
     """Partial update: all employer-editable job fields (PATCH/POST body)."""
 

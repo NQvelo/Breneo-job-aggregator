@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from django.db import transaction, connection
+from django.db import connection
 from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings as django_settings
@@ -10,6 +10,7 @@ from jobs.job_normalizer import normalize_job_fields, parse_stored_location_fiel
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
+from jobs.remote_worldwide_filter import is_remote_worldwide_listing
 import logging
 import sys
 
@@ -41,6 +42,19 @@ COMPANIES = [
     {"name": "Cloudflare", "platform": "greenhouse", "handle": "cloudflare"},
     {"name": "Xometry", "platform": "greenhouse", "handle": "xometry"},
     {"name": "Reddit", "platform": "greenhouse", "handle": "reddit"},
+    # SmartRecruiters public API: identifier = path segment on jobs.smartrecruiters.com/{Identifier}/...
+    # remote_only=True → API locationType=REMOTE (still filter further with --remote-worldwide-only if needed)
+    {"name": "Visa", "platform": "smartrecruiters", "handle": "Visa", "remote_only": True},
+    # {"name": "OtherCo", "platform": "smartrecruiters", "handle": "CompanyIdentifier", "remote_only": True},
+    # Remotive: remote-only board (see https://remotive.com/api-documentation — use their URLs; throttle fetches)
+    {
+        "name": "Remotive",
+        "platform": "remotive",
+        "url": "https://remotive.com/api/remote-jobs",
+        "dynamic_company": True,
+    },
+    # Adzuna aggregated search (set ADZUNA_APP_ID, ADZUNA_APP_KEY, optional ADZUNA_COUNTRY=us|gb|...)
+    # {"name": "Adzuna", "platform": "adzuna", "handle": "remote developer", "dynamic_company": True},
     # Note: Apple removed - they use a custom ATS system with no public API or RSS feed
     # Note: Google and Meta removed due to ToS concerns - they don't provide official APIs
     # LinkedIn: no public API. To use a third-party API, set LINKEDIN_JOBS_API_URL (and optional KEY) and add:
@@ -90,7 +104,9 @@ PLATFORM_TO_FETCHER = {
     "greenhouse": fetchers.fetch_greenhouse,
     "lever": fetchers.fetch_lever,
     "workable": fetchers.fetch_workable,
-    "smartrecruiters": getattr(fetchers, "fetch_smartrecruiters", None),
+    "smartrecruiters": fetchers.fetch_smartrecruiters,
+    "remotive": fetchers.fetch_remotive,
+    "adzuna": fetchers.fetch_adzuna,
     "rss": fetchers.fetch_rss,
     "jobs.ge": fetchers.fetch_jobs_ge_listings,
     "career_page": fetchers.fetch_generic_career_page,
@@ -109,9 +125,21 @@ class Command(BaseCommand):
             metavar="N",
             help="Stop after saving/updating N jobs (useful for capped imports). Default: no limit.",
         )
+        parser.add_argument(
+            "--purge-jobs",
+            action="store_true",
+            help="Delete all jobs before fetching (companies are kept).",
+        )
+        parser.add_argument(
+            "--remote-worldwide-only",
+            action="store_true",
+            help="Only save listings that look like remote + worldwide (skip hybrid/onsite and region-locked remote).",
+        )
 
     def handle(self, *args, **options):
         max_jobs = options.get("max_jobs")
+        purge_jobs = options.get("purge_jobs")
+        remote_worldwide_only = options.get("remote_worldwide_only")
         try:
             # Verify database connection
             from django.db import connection
@@ -120,6 +148,14 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Starting job fetch..."))
             if max_jobs is not None:
                 self.stdout.write(f"  (max {max_jobs} job(s))")
+            if purge_jobs:
+                deleted, _ = Job.objects.all().delete()
+                self.stdout.write(
+                    self.style.WARNING(f"  Purged all jobs ({deleted} row(s) removed including related objects).")
+                )
+                logger.info("Purged all jobs before fetch (%s rows)", deleted)
+            if remote_worldwide_only:
+                self.stdout.write("  Remote + worldwide filter: ON")
             logger.info("Starting job fetch command")
             
         except Exception as e:
@@ -168,7 +204,26 @@ class Command(BaseCommand):
                 continue
 
             try:
-                if platform in ("greenhouse", "lever", "workable", "smartrecruiters", "ashby"):
+                if platform == "smartrecruiters":
+                    jobs_data = fetcher(
+                        comp.get("handle"),
+                        company_name,
+                        logo=company_logo,
+                        remote_only=comp.get("remote_only", True),
+                    )
+                elif platform == "remotive":
+                    jobs_data = fetcher(
+                        comp.get("url"),
+                        company_name,
+                        company_logo,
+                    )
+                elif platform == "adzuna":
+                    jobs_data = fetcher(
+                        company_name,
+                        comp.get("handle") or "remote",
+                        company_logo,
+                    )
+                elif platform in ("greenhouse", "lever", "workable", "ashby"):
                     jobs_data = fetcher(comp.get("handle"), company_name)
                 elif platform == "linkedin":
                     api_url = comp.get("url") or getattr(django_settings, "LINKEDIN_JOBS_API_URL", None)
@@ -191,26 +246,47 @@ class Command(BaseCommand):
             company_job_count = 0
             company_complete = True
             n_feed = len(jobs_data)
-            # Process jobs in batches to avoid transaction issues
             batch_size = 50
             for idx, j in enumerate(jobs_data):
                 try:
                     ext_id = j.get("external_job_id") or j.get("apply_url")
+                    if ext_id is not None:
+                        ext_id = str(ext_id).strip()[:255]
                     if not ext_id:
                         continue
-                    found_ids.add(ext_id)
+
+                    if remote_worldwide_only and not is_remote_worldwide_listing(j):
+                        continue
 
                     # Parse posted_at only when fetcher provided it; avoid overwriting with None
                     raw_posted = j.get("posted_at")
                     parsed_posted = parse_date(raw_posted) if raw_posted else None
                     raw_location = j.get("location")
                     ploc, pcountry = parse_stored_location_fields(raw_location)
+
+                    job_company_obj = company_obj
+                    if comp.get("dynamic_company"):
+                        co_name = ((j.get("company") or company_name) or "").strip() or company_name
+                        if len(co_name) > 200:
+                            co_name = co_name[:200]
+                        job_company_obj, _ = Company.objects.get_or_create(
+                            name=co_name,
+                            defaults={
+                                "logo": get_logo_url(co_name),
+                                "platform": platform,
+                            },
+                        )
+
+                    raw_apply = (j.get("apply_url") or ext_id or "").strip()
+                    if len(raw_apply) > 2048:
+                        raw_apply = raw_apply[:2048]
+
                     defaults = {
                         "title": j.get("title") or "",
-                        "company": company_obj,
+                        "company": job_company_obj,
                         "location": ploc if ploc is not None else raw_location,
                         "description": j.get("description"),
-                        "apply_url": j.get("apply_url") or ext_id,
+                        "apply_url": raw_apply or None,
                         "raw": j.get("raw") or {},
                         "is_active": True,
                     }
@@ -310,6 +386,7 @@ class Command(BaseCommand):
                             logger.warning(f"Failed to process job description for {job_obj.title}: {e}")
 
                     # Always populate matching fields for this fetched job (work_mode, seniority, role_category, skills, etc.)
+                    norm_applied = False
                     if job_obj.title and (job_obj.description or job_obj.qualifications):
                         try:
                             norm = normalize_job_fields(
@@ -318,6 +395,7 @@ class Command(BaseCommand):
                                 location=raw_location or job_obj.location,
                                 qualifications_text=job_obj.qualifications,
                             )
+                            norm_applied = True
                             job_obj.work_mode = norm.get("work_mode", "unknown")
                             job_obj.seniority = norm.get("seniority", "unknown")
                             job_obj.role_category = norm.get("role_category")
@@ -355,7 +433,16 @@ class Command(BaseCommand):
                         if job_obj.title:
                             _compute_industry_tags(job_obj, j, created, logger)
                             job_obj.save(update_fields=["industry_tags"])
-                    
+
+                    if (
+                        remote_worldwide_only
+                        and norm_applied
+                        and job_obj.work_mode in ("hybrid", "onsite")
+                    ):
+                        job_obj.delete()
+                        continue
+
+                    found_ids.add(ext_id)
                     total += 1
                     company_job_count += 1
 
@@ -367,8 +454,7 @@ class Command(BaseCommand):
                     
                     # Commit in batches to ensure persistence without slowing down too much
                     if company_job_count % batch_size == 0:
-                        transaction.commit()
-                        logger.debug(f"Committed batch of {batch_size} jobs for {company_name}")
+                        logger.debug(f"Processed batch of {batch_size} jobs for {company_name}")
 
                 except Exception as e:
                     error_msg = f"Failed to save job {j.get('title')}: {str(e)}"
@@ -379,13 +465,14 @@ class Command(BaseCommand):
             # skip when --max-jobs stopped mid-company to avoid wrong inactive flags)
             try:
                 if company_complete:
-                    qs = Job.objects.filter(platform=platform, company=company_obj)
+                    if comp.get("dynamic_company"):
+                        qs = Job.objects.filter(platform=platform)
+                    else:
+                        qs = Job.objects.filter(platform=platform, company=company_obj)
                     if found_ids:
                         inactive_count = qs.exclude(external_job_id__in=found_ids).update(is_active=False)
                         if inactive_count > 0:
                             self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
-                            # Explicitly commit transaction
-                            transaction.commit()
             except Exception as e:
                 error_msg = f"Failed to mark inactive jobs for {company_name} ({platform}): {str(e)}"
                 logger.exception(error_msg)
@@ -393,14 +480,10 @@ class Command(BaseCommand):
 
             self.stdout.write(self.style.SUCCESS(f"  ✓ Fetched {company_job_count} jobs for {company_name}"))
 
-        # Final commit to ensure all changes are persisted
-        transaction.commit()
-
         # Delete inactive jobs from the dataset (no longer in feeds)
         try:
             deleted_count, _ = Job.objects.filter(is_active=False).delete()
             if deleted_count > 0:
-                transaction.commit()
                 self.stdout.write(self.style.WARNING(f"  🗑 Deleted {deleted_count} inactive job(s) from the dataset"))
                 logger.info("Deleted %d inactive jobs from the dataset", deleted_count)
         except Exception as e:

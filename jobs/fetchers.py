@@ -360,6 +360,222 @@ def fetch_linkedin(jobs_api_url, company_name, api_key=None, logo=None):
         logger.exception("LinkedIn jobs API fetch failed for %s", company_name)
         return []
 
+
+def _smartrecruiters_flatten_sections(sections: dict | list | None) -> str:
+    """Merge SmartRecruiters jobAd.sections HTML into one string."""
+    if not sections:
+        return ""
+    chunks: list[str] = []
+    if isinstance(sections, dict):
+        for sec in sections.values():
+            if isinstance(sec, dict) and sec.get("text"):
+                chunks.append(str(sec["text"]))
+    elif isinstance(sections, list):
+        for sec in sections:
+            if isinstance(sec, dict) and sec.get("text"):
+                chunks.append(str(sec["text"]))
+    return "\n\n".join(chunks)
+
+
+def fetch_smartrecruiters(
+    company_handle: str,
+    company_name: str,
+    logo: str | None = None,
+    *,
+    remote_only: bool = True,
+    fetch_details: bool = True,
+) -> list:
+    """
+    SmartRecruiters public Posting API (no auth for public listings).
+    https://developers.smartrecruiters.com/reference/v1listpostings
+
+    company_handle: identifier in https://jobs.smartrecruiters.com/{handle}/...
+    remote_only: request locationType=REMOTE (still may include US-only remote roles).
+    fetch_details: one GET per posting for applyUrl + full description (recommended).
+    """
+    logo = logo or get_logo_url(company_name)
+    base = "https://api.smartrecruiters.com/v1/companies"
+    jobs: list = []
+    offset = 0
+    limit = 100
+    try:
+        while True:
+            params: dict = {"limit": limit, "offset": offset, "destination": "PUBLIC"}
+            if remote_only:
+                params["locationType"] = "REMOTE"
+            url = f"{base}/{company_handle}/postings"
+            r = httpx.get(url, headers=HEADERS, params=params, timeout=30)
+            if r.status_code == 404:
+                logger.warning(
+                    "SmartRecruiters: no postings for identifier %r (404)", company_handle
+                )
+                break
+            r.raise_for_status()
+            data = r.json()
+            content = data.get("content") or []
+            if not content:
+                break
+            for item in content:
+                pid = item.get("id")
+                if not pid:
+                    continue
+                cid = (item.get("company") or {}).get("identifier") or company_handle
+                loc = item.get("location") or {}
+                loc_str = loc.get("fullLocation") or ""
+                if not loc_str.strip():
+                    loc_str = ", ".join(
+                        filter(
+                            None,
+                            [loc.get("city"), loc.get("region"), loc.get("country")],
+                        )
+                    )
+                if loc.get("remote"):
+                    loc_str = f"Remote · {loc_str}" if loc_str else "Remote"
+
+                apply_url = ""
+                description_html = ""
+                if fetch_details:
+                    try:
+                        dr = httpx.get(f"{base}/{cid}/postings/{pid}", headers=HEADERS, timeout=25)
+                        if dr.status_code == 200:
+                            det = dr.json()
+                            apply_url = (det.get("applyUrl") or det.get("postingUrl") or "").strip()
+                            ja = det.get("jobAd") or {}
+                            sections = ja.get("sections")
+                            description_html = _smartrecruiters_flatten_sections(sections)
+                    except Exception as e:
+                        logger.debug("SmartRecruiters detail %s/%s: %s", cid, pid, e)
+
+                if not apply_url:
+                    apply_url = (item.get("ref") or "").strip()
+
+                ext = item.get("uuid") or str(pid)
+                jobs.append(
+                    {
+                        "title": item.get("name") or "",
+                        "company": company_name,
+                        "location": loc_str or "Remote",
+                        "description": clean_html_to_text(description_html)
+                        if description_html
+                        else "",
+                        "apply_url": apply_url,
+                        "posted_at": parse_date(item.get("releasedDate")),
+                        "platform": "smartrecruiters",
+                        "external_job_id": str(ext),
+                        "raw": {**item, "source": "smartrecruiters"},
+                        "logo": logo,
+                    }
+                )
+            offset += len(content)
+            total_found = int(data.get("totalFound") or 0)
+            if offset >= total_found or len(content) < limit:
+                break
+    except Exception:
+        logger.exception("SmartRecruiters fetch error for %s (%s)", company_name, company_handle)
+    return jobs
+
+
+def fetch_remotive(api_url: str | None, aggregate_name: str, logo: str | None = None) -> list:
+    """
+    Remotive public API — remote jobs only.
+    Terms: https://remotive.com/api-documentation (link to their job URLs; avoid excessive polling).
+    """
+    logo = logo or get_logo_url("Remotive")
+    url = (api_url or "").strip() or "https://remotive.com/api/remote-jobs"
+    jobs: list = []
+    try:
+        r = httpx.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        for job in data.get("jobs") or []:
+            jid = job.get("id")
+            if jid is None:
+                continue
+            co = (job.get("company_name") or "").strip() or aggregate_name
+            loc = (job.get("candidate_required_location") or "").strip() or "Remote"
+            jobs.append(
+                {
+                    "title": job.get("title") or "",
+                    "company": co,
+                    "location": loc,
+                    "description": clean_html_to_text(job.get("description") or ""),
+                    "apply_url": (job.get("url") or "").strip(),
+                    "posted_at": parse_date(job.get("publication_date")),
+                    "platform": "remotive",
+                    "external_job_id": str(jid),
+                    "raw": {
+                        **job,
+                        "source": "Remotive",
+                        "remotive_terms": "https://remotive.com/api-documentation",
+                    },
+                    "logo": job.get("company_logo") or logo,
+                }
+            )
+    except Exception:
+        logger.exception("Remotive fetch failed for %s", url)
+    return jobs
+
+
+def fetch_adzuna(company_name: str, what: str = "remote", logo: str | None = None) -> list:
+    """
+    Adzuna aggregated search (remote-oriented query). Requires ADZUNA_APP_ID / ADZUNA_APP_KEY.
+    https://developer.adzuna.com/docs/search
+    """
+    from django.conf import settings
+
+    app_id = getattr(settings, "ADZUNA_APP_ID", "") or ""
+    app_key = getattr(settings, "ADZUNA_APP_KEY", "") or ""
+    country = getattr(settings, "ADZUNA_COUNTRY", None) or "gb"
+    if not app_id or not app_key:
+        logger.info("Adzuna: skip (set ADZUNA_APP_ID and ADZUNA_APP_KEY)")
+        return []
+
+    logo = logo or get_logo_url(company_name or "Adzuna")
+    jobs: list = []
+    page = 1
+    max_pages = 3
+    try:
+        while page <= max_pages:
+            url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
+            r = httpx.get(
+                url,
+                params={
+                    "app_id": app_id,
+                    "app_key": app_key,
+                    "what": what,
+                    "results_per_page": 50,
+                },
+                headers=HEADERS,
+                timeout=25,
+            )
+            r.raise_for_status()
+            data = r.json()
+            results = data.get("results") or []
+            for res in results:
+                co = (res.get("company") or {}).get("display_name") or "Unknown"
+                loc = (res.get("location") or {}).get("display_name") or ""
+                jobs.append(
+                    {
+                        "title": res.get("title") or "",
+                        "company": co.strip() or "Unknown",
+                        "location": loc or "Remote",
+                        "description": clean_html_to_text(res.get("description") or ""),
+                        "apply_url": (res.get("redirect_url") or res.get("url") or "").strip(),
+                        "posted_at": parse_date(res.get("created")),
+                        "platform": "adzuna",
+                        "external_job_id": str(res.get("id")),
+                        "raw": {**res, "source": "adzuna"},
+                        "logo": logo,
+                    }
+                )
+            if len(results) < 50:
+                break
+            page += 1
+    except Exception:
+        logger.exception("Adzuna fetch failed")
+    return jobs
+
+
 # import httpx
 # from bs4 import BeautifulSoup
 # from .utils import parse_date, robots_allowed

@@ -162,6 +162,11 @@ _RESPONSIBILITY_KEYWORDS = frozenset([
     "key responsibilities", "duties", "day to day", "a typical week", "what you'll work on",
     "what we do", "role and responsibilities", "main responsibilities", "key duties",
     "what you'll own", "your responsibilities", "core responsibilities",
+    # Georgian (common ATS / employer wording)
+    "შენი როლი",  # your role
+    "თქვენი როლი",
+    "ძირითადი ამოცან",  # main tasks / duties
+    "სამუშაო ამოცან",
 ])
 
 _QUALIFICATION_KEYWORDS = frozenset([
@@ -172,6 +177,13 @@ _QUALIFICATION_KEYWORDS = frozenset([
     "required experience", "desired qualifications", "about you", "you bring",
     "candidate profile", "ideal candidate",
     "basic qualifications", "preferred skills", "skills and experience",
+    # Georgian
+    "თუ გაქვს",  # if you have (often in "this role is for you if you have…")
+    "ვაკანსია შენთვის",  # this vacancy is for you
+    "ვაკანსია თქვენთვის",
+    "ძირითადი მოთხოვნ",  # basic requirements (ძირითადი მოთხოვნები)
+    "საჭირო უნარ",  # required skills
+    "რას ვეძებთ",  # what we are looking for
 ])
 
 _INTRO_KEYWORDS = frozenset([
@@ -187,6 +199,12 @@ _IGNORE_KEYWORDS = frozenset([
     "privacy", "how to apply", "application process", "legal", "disclaimer",
     "pay transparency", "applicant", "diversity", "accessibility",
     "education required", "itar", "compensation information",
+    # Georgian (benefits, apply, legal — not role duties or must-haves)
+    "დაგხვდება",  # "you will find" / what the company offers
+    "დაინტერესებული",  # if you are interested (how to apply)
+    "პერსონალურ მონაცემ",  # personal data (privacy block)
+    "დისკრიმინაცი",  # anti-discrimination policy
+    "გამოგზავნეთ",  # send (often "send your CV…")
 ])
 
 
@@ -370,12 +388,14 @@ def classify_section(title: str) -> str:
 # E) BULLET / ITEM EXTRACTION
 # ---------------------------------------------------------------------------
 
-_BULLET_MARKERS = re.compile(r"^[\s]*[\-\*\u2022\u2013]\s+", re.UNICODE)
+# Includes `**` markdown-style bullets used in many postings (incl. Georgian)
+_BULLET_MARKERS = re.compile(r"^[\s]*(?:\*\*|[\-\*\u2022\u2013])\s+", re.UNICODE)
 _NUMBERED_MARKER = re.compile(r"^[\s]*\d+[.)\-\s]+\s*", re.UNICODE)
 
 
 def _strip_bullet_prefix(line: str) -> str:
     s = line.strip()
+    s = re.sub(r"^\*{1,2}\s*", "", s)  # `** item` when pattern above matched only one `*`
     s = _BULLET_MARKERS.sub("", s, count=1)
     s = _NUMBERED_MARKER.sub("", s, count=1)
     return s.strip()

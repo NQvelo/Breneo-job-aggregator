@@ -136,6 +136,11 @@ API_GROUPS = [
                 "description": "Retrieve, update, or delete a membership row.",
             },
             {
+                "methods": ["POST"],
+                "path": "/api/jobs/parse-description",
+                "description": "Gemini: parse job description text into responsibilities, qualifications, skills_required (JSON arrays; employer_manual only; same auth as employer APIs).",
+            },
+            {
                 "methods": ["GET", "POST"],
                 "path": "/api/employer/jobs",
                 "description": "GET list (?company_id= or ?company=); POST create employer job.",
