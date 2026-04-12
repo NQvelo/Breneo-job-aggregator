@@ -45,14 +45,32 @@ class DynamicFieldsModelSerializer(serializers.ModelSerializer):
                 self.fields.pop(field_name)
 
 
-class JobSerializer(DynamicFieldsModelSerializer):
+class JobCityCountryFieldsMixin(serializers.ModelSerializer):
+    """City/country mirror location/location_country for stable public API field names."""
+
+    city = serializers.SerializerMethodField()
+    country = serializers.SerializerMethodField()
+
+    class Meta:
+        abstract = True
+
+    def get_city(self, obj):
+        v = getattr(obj, "location", None)
+        return "" if v is None else v
+
+    def get_country(self, obj):
+        v = getattr(obj, "location_country", None)
+        return "" if v is None else v
+
+
+class JobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
     company_logo = serializers.SerializerMethodField()
     description_short = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'company_logo', 'location', 'location_country',
+            'id', 'title', 'company', 'company_logo', 'location', 'location_country', 'city', 'country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
@@ -154,7 +172,7 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         return representation
 
 
-class NestedJobSerializer(DynamicFieldsModelSerializer):
+class NestedJobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
     """Serializer for jobs nested within company data"""
     company = CompanyInfoSerializer(read_only=True)
     description_short = serializers.SerializerMethodField()
@@ -162,7 +180,7 @@ class NestedJobSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'location', 'location_country',
+            'id', 'title', 'company', 'location', 'location_country', 'city', 'country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',

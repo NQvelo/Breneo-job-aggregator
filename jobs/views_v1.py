@@ -70,6 +70,10 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         if location:
             queryset = queryset.filter(location__icontains=location)
 
+        country = self.request.query_params.get('country')
+        if country:
+            queryset = queryset.filter(location_country__icontains=country)
+
         work_mode = self.request.query_params.get('work_mode')
         if work_mode:
             queryset = queryset.filter(work_mode__iexact=work_mode)

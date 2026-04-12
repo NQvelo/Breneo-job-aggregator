@@ -17,6 +17,7 @@ class APIV1TestCase(TestCase):
             title='Senior Python Engineer',
             company=self.company,
             location='Berlin',
+            location_country='Germany',
             work_mode='remote',
             seniority='senior',
             posted_at=timezone.now(),
@@ -30,6 +31,7 @@ class APIV1TestCase(TestCase):
             title='Junior Frontend Developer',
             company=self.company,
             location='San Francisco',
+            location_country='USA',
             work_mode='onsite',
             seniority='junior',
             posted_at=timezone.now() - timedelta(days=2),
@@ -77,6 +79,26 @@ class APIV1TestCase(TestCase):
         response = self.client.get(url, {'location': 'San'})
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['location'], 'San Francisco')
+
+    def test_list_includes_city_and_country(self):
+        url = reverse('job-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        by_id = {r['id']: r for r in response.data['results']}
+        r1 = by_id[self.job1.id]
+        self.assertEqual(r1['city'], 'Berlin')
+        self.assertEqual(r1['country'], 'Germany')
+        self.assertEqual(r1['location'], 'Berlin')
+        self.assertEqual(r1['location_country'], 'Germany')
+        r3 = by_id[self.job3.id]
+        self.assertEqual(r3['city'], 'London')
+        self.assertEqual(r3['country'], '')
+
+    def test_filter_country(self):
+        url = reverse('job-list')
+        response = self.client.get(url, {'country': 'Germany'})
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], self.job1.id)
 
     def test_filter_work_mode(self):
         url = reverse('job-list')
