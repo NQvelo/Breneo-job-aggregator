@@ -3,16 +3,19 @@ import os
 from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import BasePermission
 
-from jobs.authentication.breneo_auth import BreneoUser
+from jobs.authentication.application_auth import ApplicationUser
 
 
-class IsBreneoAuthenticated(BasePermission):
-    """Require a valid breneo-api Bearer token (BreneoUser on request.user)."""
+class IsApplicationUserAuthenticated(BasePermission):
+    """Require signed application headers or BFF X-Application-Key + external_user_id."""
 
-    message = "Authentication required. Send Authorization: Bearer <breneo-api token>."
+    message = (
+        "Application auth required. Send X-Breneo-User-Id, X-Breneo-Timestamp, "
+        "and X-Breneo-Signature from breneo login response."
+    )
 
     def has_permission(self, request, view):
-        if not isinstance(getattr(request, "user", None), BreneoUser):
+        if not isinstance(getattr(request, "user", None), ApplicationUser):
             raise NotAuthenticated(detail=self.message)
         return True
 

@@ -9,10 +9,12 @@ from django.db import IntegrityError
 from ..application_exceptions import (
     AlreadyAppliedError,
     ApplicationNotFoundError,
+    EmployerJobOnlyError,
     ForbiddenJobAccessError,
     JobNotAcceptingApplicationsError,
     JobNotFoundError,
 )
+from ..job_apply_eligibility import job_supports_in_app_apply
 from ..models import CompanyStaffMembership, JobApplication
 from ..repositories.job_applications import JobApplicationRepository
 from .breneo_user_client import fetch_user_profiles
@@ -30,6 +32,11 @@ class JobApplicationService:
             raise JobNotFoundError("Job not found")
         if not job.is_active:
             raise JobNotAcceptingApplicationsError("Job is not accepting applications")
+        if not job_supports_in_app_apply(job):
+            raise EmployerJobOnlyError(
+                "In-app apply is only available for jobs posted on the Breneo platform. "
+                "Use the external apply link for this job."
+            )
 
         existing = self.repo.get_application_row(user_id, job_id)
         if existing:

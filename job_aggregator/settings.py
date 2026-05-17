@@ -299,8 +299,10 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-# Breneo-api authentication (job applications and other protected user routes)
-BRENEO_AUTH_DEV_TOKEN_PREFIX = os.environ.get("BRENEO_AUTH_DEV_TOKEN_PREFIX", "dev:")
+# Job applications: HMAC signed headers (same secret on breneo-api + job-aggregator).
+# breneo-api login/me returns applicationAuth { userId, timestamp, signature } for the frontend.
+# APPLICATION_SIGNATURE_SECRET — shared signing key (not a Bearer JWT).
+# APPLICATION_SIGNATURE_MAX_AGE_SECONDS — default 900 (15 minutes).
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Breneo Job Aggregator API",

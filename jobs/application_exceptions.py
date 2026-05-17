@@ -28,6 +28,11 @@ class JobNotAcceptingApplicationsError(JobApplicationError):
     error_code = "job_not_accepting_applications"
 
 
+class EmployerJobOnlyError(JobApplicationError):
+    status_code = 400
+    error_code = "employer_job_only"
+
+
 class AlreadyAppliedError(JobApplicationError):
     status_code = 409
     error_code = "already_applied"

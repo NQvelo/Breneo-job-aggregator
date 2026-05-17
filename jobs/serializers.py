@@ -46,6 +46,23 @@ class DynamicFieldsModelSerializer(serializers.ModelSerializer):
                 self.fields.pop(field_name)
 
 
+class JobApplyEligibilityMixin(serializers.ModelSerializer):
+    """
+    Frontend: if supports_in_app_apply is true, show Breneo Apply button.
+    If false, keep the existing external apply link/button (apply_url) unchanged.
+    """
+
+    supports_in_app_apply = serializers.SerializerMethodField()
+
+    class Meta:
+        abstract = True
+
+    def get_supports_in_app_apply(self, obj) -> bool:
+        from .job_apply_eligibility import job_supports_in_app_apply
+
+        return job_supports_in_app_apply(obj)
+
+
 class JobCityCountryFieldsMixin(serializers.ModelSerializer):
     """City/country mirror location/location_country for stable public API field names."""
 
@@ -64,7 +81,7 @@ class JobCityCountryFieldsMixin(serializers.ModelSerializer):
         return "" if v is None else v
 
 
-class JobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
+class JobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
     company_logo = serializers.SerializerMethodField()
     description_short = serializers.SerializerMethodField()
 
@@ -76,9 +93,10 @@ class JobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
             'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications',
-            'salary', 'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active', 'raw',
+            'salary', 'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active',
+            'supports_in_app_apply', 'raw',
         ]
-        read_only_fields = ['id', 'fetched_at']
+        read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
 
     def get_description_short(self, obj):
         """Short description for table/list: max 4 lines."""
@@ -173,7 +191,7 @@ class CompanyInfoSerializer(DynamicFieldsModelSerializer):
         return representation
 
 
-class NestedJobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
+class NestedJobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, DynamicFieldsModelSerializer):
     """Serializer for jobs nested within company data"""
     company = CompanyInfoSerializer(read_only=True)
     description_short = serializers.SerializerMethodField()
@@ -187,9 +205,9 @@ class NestedJobSerializer(JobCityCountryFieldsMixin, DynamicFieldsModelSerialize
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
             'description', 'description_short', 'responsibilities', 'qualifications',
             'salary', 'apply_url', 'platform', 'external_job_id',
-            'posted_at', 'fetched_at', 'is_active', 'raw',
+            'posted_at', 'fetched_at', 'is_active', 'supports_in_app_apply', 'raw',
         ]
-        read_only_fields = ['id', 'fetched_at']
+        read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
 
     def get_description_short(self, obj):
         return obj.get_description_short(max_lines=4, max_chars=400)
@@ -524,7 +542,9 @@ def job_to_dict(job):
         }
 
 
-class JobApplicationJobSummarySerializer(JobCityCountryFieldsMixin, serializers.ModelSerializer):
+class JobApplicationJobSummarySerializer(
+    JobApplyEligibilityMixin, JobCityCountryFieldsMixin, serializers.ModelSerializer
+):
     """Nested job details for application list responses."""
 
     company_name = serializers.CharField(source="company.name", read_only=True)
@@ -550,7 +570,9 @@ class JobApplicationJobSummarySerializer(JobCityCountryFieldsMixin, serializers.
             "platform",
             "posted_at",
             "is_active",
+            "supports_in_app_apply",
         ]
+        read_only_fields = ["supports_in_app_apply"]
 
     def get_company_logo(self, obj):
         from jobs.logo_url import resolved_company_logo_url

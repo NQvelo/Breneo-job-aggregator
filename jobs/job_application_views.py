@@ -11,10 +11,10 @@ from rest_framework.views import APIView
 
 from .api_response import error_response, success_response
 from .application_exceptions import JobApplicationError
-from .authentication import BreneoJWTRequiredAuthentication, get_breneo_user_id
+from .authentication import ApplicationUserRequiredAuthentication, get_application_user_id
 from .breneo_user import external_user_id_from_request
 from .pagination import ApplicationPagination
-from .permissions import CanViewJobApplicants, IsBreneoAuthenticated
+from .permissions import CanViewJobApplicants, IsApplicationUserAuthenticated
 from .serializers import JobApplicantSerializer, JobApplicationSerializer
 from .services.job_applications import JobApplicationService
 
@@ -38,6 +38,30 @@ APPLICATION_SORT_PARAMS = [
         type=int,
         location=OpenApiParameter.QUERY,
         description="Page number",
+    ),
+]
+
+APPLICATION_AUTH_HEADERS = [
+    OpenApiParameter(
+        name="X-Breneo-User-Id",
+        type=str,
+        location=OpenApiParameter.HEADER,
+        required=True,
+        description="Breneo user id (from login/me applicationAuth)",
+    ),
+    OpenApiParameter(
+        name="X-Breneo-Timestamp",
+        type=str,
+        location=OpenApiParameter.HEADER,
+        required=True,
+        description="Unix timestamp used when signing",
+    ),
+    OpenApiParameter(
+        name="X-Breneo-Signature",
+        type=str,
+        location=OpenApiParameter.HEADER,
+        required=True,
+        description="HMAC-SHA256 signature from breneo-api (shared secret with aggregator)",
     ),
 ]
 
@@ -114,29 +138,24 @@ class JobApplicationBaseView(APIView):
 class JobApplyView(JobApplicationBaseView):
     """
     POST /api/jobs/<job_id>/apply
-    Apply to a job (authenticated breneo user).
+    In-app apply for Breneo employer-posted jobs only (platform=employer).
     """
 
-    authentication_classes = [BreneoJWTRequiredAuthentication]
-    permission_classes = [IsBreneoAuthenticated]
+    authentication_classes = [ApplicationUserRequiredAuthentication]
+    permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
-        summary="Apply to a job",
+        summary="Apply to a Breneo employer job",
         description=(
-            "Creates a row in `job_applications` for the authenticated user. "
-            "Requires `Authorization: Bearer <breneo-api JWT>`. Returns 409 if already applied."
+            "Creates a row in `job_applications`. Auth: signed headers from breneo login "
+            "(not Bearer JWT). Only jobs with platform=employer. Fetched ATS jobs use apply_url."
         ),
+        parameters=APPLICATION_AUTH_HEADERS,
         responses={201: _envelope, 400: _envelope, 401: _envelope, 404: _envelope, 409: _envelope},
     )
     def post(self, request, job_id: int):
-        user_id = get_breneo_user_id(request)
-        if not user_id:
-            return error_response(
-                "Authentication required",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                error="not_authenticated",
-            )
+        user_id = get_application_user_id(request)
         try:
             application = self.get_service().apply(user_id, job_id)
         except JobApplicationError as exc:
@@ -154,28 +173,19 @@ class JobApplyView(JobApplicationBaseView):
 
 
 class JobWithdrawApplicationView(JobApplicationBaseView):
-    """
-    DELETE /api/jobs/<job_id>/application
-    Withdraw the current user's application (soft delete).
-    """
+    """DELETE /api/jobs/<job_id>/application — withdraw in-app application."""
 
-    authentication_classes = [BreneoJWTRequiredAuthentication]
-    permission_classes = [IsBreneoAuthenticated]
+    authentication_classes = [ApplicationUserRequiredAuthentication]
+    permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
         summary="Withdraw application",
-        description="Soft-deletes the application by setting `withdrawn_at`.",
+        parameters=APPLICATION_AUTH_HEADERS,
         responses={200: _envelope, 401: _envelope, 404: _envelope},
     )
     def delete(self, request, job_id: int):
-        user_id = get_breneo_user_id(request)
-        if not user_id:
-            return error_response(
-                "Authentication required",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                error="not_authenticated",
-            )
+        user_id = get_application_user_id(request)
         try:
             application = self.get_service().withdraw(user_id, job_id)
         except JobApplicationError as exc:
@@ -192,28 +202,19 @@ class JobWithdrawApplicationView(JobApplicationBaseView):
 
 
 class UserApplicationsView(JobApplicationBaseView):
-    """
-    GET /api/users/me/applications
-    List jobs the authenticated user applied to (paginated).
-    """
+    """GET /api/users/me/applications — list user's in-app applications."""
 
-    authentication_classes = [BreneoJWTRequiredAuthentication]
-    permission_classes = [IsBreneoAuthenticated]
+    authentication_classes = [ApplicationUserRequiredAuthentication]
+    permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
         summary="List my applications",
-        parameters=APPLICATION_SORT_PARAMS,
+        parameters=APPLICATION_SORT_PARAMS + APPLICATION_AUTH_HEADERS,
         responses={200: _envelope, 401: _envelope},
     )
     def get(self, request):
-        user_id = get_breneo_user_id(request)
-        if not user_id:
-            return error_response(
-                "Authentication required",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                error="not_authenticated",
-            )
+        user_id = get_application_user_id(request)
         qs = self.get_service().list_user_applications(user_id, sort=self._sort_param(request))
         paginator, page = self.paginate_queryset(request, qs)
         if page is not None:
@@ -232,10 +233,7 @@ class UserApplicationsView(JobApplicationBaseView):
 
 
 class JobApplicantsView(JobApplicationBaseView):
-    """
-    GET /api/jobs/<job_id>/applicants
-    Recruiter/admin: applicants for a job (paginated, with user profiles).
-    """
+    """GET /api/jobs/<job_id>/applicants — recruiter (X-Employer-Key)."""
 
     authentication_classes = []
     permission_classes = [CanViewJobApplicants]
@@ -243,10 +241,6 @@ class JobApplicantsView(JobApplicationBaseView):
     @extend_schema(
         tags=["Job applications"],
         summary="List job applicants (recruiter)",
-        description=(
-            "Requires `X-Employer-Key` or Employer Django group. "
-            "Optional `?external_user_id=` scopes to company staff."
-        ),
         parameters=APPLICATION_SORT_PARAMS
         + [
             OpenApiParameter(
@@ -259,14 +253,13 @@ class JobApplicantsView(JobApplicationBaseView):
         responses={200: _envelope, 403: _envelope, 404: _envelope},
     )
     def get(self, request, job_id: int):
-        scoped_uid = external_user_id_from_request(request) or get_breneo_user_id(request)
-        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip() or None
+        scoped_uid = external_user_id_from_request(request) or get_application_user_id(request)
         try:
             applications, profiles, job = self.get_service().list_job_applicants(
                 job_id,
                 requester_user_id=scoped_uid or None,
                 sort=self._sort_param(request),
-                auth_token=token if isinstance(token, str) else None,
+                auth_token=None,
             )
         except JobApplicationError as exc:
             return error_response(
