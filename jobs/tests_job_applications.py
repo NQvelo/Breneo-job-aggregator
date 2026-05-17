@@ -63,12 +63,66 @@ class JobApplicationAPITests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self._assert_success_envelope(response)
-        self.assertEqual(response.data["data"]["user_id"], self.user_id)
-        self.assertEqual(response.data["data"]["user_email"], "jane@example.com")
-        self.assertEqual(response.data["data"]["user_name"], "Jane")
-        self.assertEqual(response.data["data"]["user_surname"], "Doe")
-        row = JobApplication.objects.get(pk=response.data["data"]["id"])
+        data = response.data["data"]
+        self.assertEqual(data["user_id"], self.user_id)
+        self.assertEqual(data["external_user_id"], self.user_id)
+        self.assertEqual(data["user_email"], "jane@example.com")
+        self.assertEqual(data["external_user_email"], "jane@example.com")
+        self.assertEqual(data["user_name"], "Jane")
+        self.assertEqual(data["external_user_name"], "Jane")
+        self.assertEqual(data["user_surname"], "Doe")
+        self.assertEqual(data["external_user_surname"], "Doe")
+        row = JobApplication.objects.get(pk=data["id"])
         self.assertEqual(row.external_user_email, "jane@example.com")
+
+    def test_apply_accepts_camelcase_bff_fields(self):
+        url = reverse("job_apply", kwargs={"job_id": self.job.id})
+        response = self.client.post(
+            url,
+            {
+                "external_user_id": self.user_id,
+                "email": "camel@example.com",
+                "firstName": "Camel",
+                "lastName": "Case",
+            },
+            format="json",
+            **_bff_headers(self.user_id),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.data["data"]
+        self.assertEqual(data["external_user_email"], "camel@example.com")
+        self.assertEqual(data["external_user_name"], "Camel")
+        self.assertEqual(data["external_user_surname"], "Case")
+
+    def test_list_applications_includes_all_user_fields(self):
+        JobApplication.objects.create(
+            external_user_id=self.user_id,
+            external_user_email="list@example.com",
+            external_user_name="List",
+            external_user_surname="User",
+            job=self.job,
+            applied_at=timezone.now(),
+        )
+        url = reverse("user_applications")
+        response = self.client.get(
+            url,
+            {"external_user_id": self.user_id},
+            **_bff_headers(self.user_id),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = response.data["data"]["items"][0]
+        for key in (
+            "external_user_id",
+            "external_user_email",
+            "external_user_name",
+            "external_user_surname",
+            "user_id",
+            "user_email",
+            "user_name",
+            "user_surname",
+        ):
+            self.assertIn(key, item, msg=f"missing {key}")
+        self.assertEqual(item["external_user_email"], "list@example.com")
 
     def test_apply_requires_bff_key(self):
         url = reverse("job_apply", kwargs={"job_id": self.job.id})

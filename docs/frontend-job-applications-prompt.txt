@@ -1,340 +1,186 @@
-FRONTEND INTEGRATION — JOB APPLICATIONS (copy this into Cursor for the UI repo)
-================================================================================
+FRONTEND UPDATE — ADD USER EMAIL, NAME & SURNAME TO JOB APPLICATIONS
+=======================================================================
 
-Backend is verified working via Postman. Implement the UI using the rules below.
+You already implemented apply / my applications / withdraw via BFF. This prompt adds
+the missing applicant fields: email, first name, surname.
 
--------------------------------------------------------------------------------
-SUMMARY
--------------------------------------------------------------------------------
-
-• Job aggregator base URL for public job data: NEXT_PUBLIC_JOB_AGGREGATOR_URL
-• Apply / my applications / withdraw: browser → YOUR Next.js API routes (BFF) only
-• BFF → job-aggregator with header X-Application-Key = server env EMPLOYER_POST_SECRET
-• BFF sends external_user_id = logged-in Breneo user id (string)
-• Do NOT use Authorization: Bearer on job-aggregator
-• Do NOT put EMPLOYER_POST_SECRET in NEXT_PUBLIC_* or client code
+Backend stores and returns them on every application record. You only need to update
+your BFF POST body and UI types/display.
 
 -------------------------------------------------------------------------------
-ENVIRONMENT
+WHAT CHANGED ON THE BACKEND
 -------------------------------------------------------------------------------
 
-# Browser — job listings, search, job detail (public, no secret)
-NEXT_PUBLIC_JOB_AGGREGATOR_URL=https://breneo-job-aggregator.up.railway.app
+Table job_applications now has:
+  external_user_email
+  external_user_name      (first name)
+  external_user_surname   (last name)
 
-# Server only — BFF routes (same host as your Next app, not exposed to client)
-JOB_AGGREGATOR_BASE_URL=https://breneo-job-aggregator.up.railway.app
-EMPLOYER_POST_SECRET=<same value as Railway on job-aggregator service>
+Every application API response includes ALL of these keys (always strings, "" if empty):
 
-# Optional alias (aggregator accepts either; same value is fine):
-# APPLICATION_API_SECRET=<same as EMPLOYER_POST_SECRET>
+  external_user_id
+  external_user_email
+  external_user_name
+  external_user_surname
+  user_id              // same as external_user_id
+  user_email           // same as external_user_email
+  user_name            // same as external_user_name
+  user_surname         // same as external_user_surname
 
--------------------------------------------------------------------------------
-TWO APPLY BUTTONS (DO NOT CHANGE FETCHED JOBS)
--------------------------------------------------------------------------------
-
-Every job from the aggregator includes:
-
-  supports_in_app_apply: boolean   // true when platform === "employer"
-  apply_url: string | null
-  platform: string
-
-UI rule:
-
-  if (job.supports_in_app_apply) {
-    // Breneo employer job — in-app apply via BFF
-    show <ApplyButton onClick={() => applyViaBff(job.id)} />
-    optionally show "Applied" if jobId is in my-applications list
-  } else {
-    // Auto-fetched job (greenhouse, lever, ashby, …) — KEEP EXISTING UI
-    show <a href={job.apply_url} target="_blank" rel="noopener noreferrer">Apply</a>
-    // same label, styling, and link behaviour as today — do not call apply API
-  }
+Use either naming style in TypeScript; values are identical.
 
 -------------------------------------------------------------------------------
-ARCHITECTURE
+FIX 1 — BFF APPLY ROUTE (required)
 -------------------------------------------------------------------------------
 
-  [Browser]  --fetch-->  [/api/app/...]  --fetch-->  [job-aggregator /api/...]
-              no secret              EMPLOYER_POST_SECRET in header only here
-
--------------------------------------------------------------------------------
-AGGREGATOR ENDPOINTS (called from BFF, not browser)
--------------------------------------------------------------------------------
-
-Base: process.env.JOB_AGGREGATOR_BASE_URL
-
-Auth on apply / list / withdraw:
-  Header: X-Application-Key: process.env.EMPLOYER_POST_SECRET
-  User:   external_user_id in query or JSON body (= session user id)
-
-Recruiter applicants (optional BFF):
-  Header: X-Employer-Key: process.env.EMPLOYER_POST_SECRET  (same secret, different header name)
-
---- Public (browser may call directly) ---
-
-  GET  /api/v1/jobs/?page=1&limit=20
-  GET  /api/v1/jobs/{id}/
-  GET  /api/search?...
-  GET  /api/job-details?...
-
---- BFF only (user session required) ---
-
-  POST   /api/jobs/{jobId}/apply
-         Body: {
-           "external_user_id": "<userId>",
-           "external_user_email": "<email>",
-           "external_user_name": "<first name>",
-           "external_user_surname": "<last name>"
-         }
-         (email/name/surname also accepted as user_email, first_name, last_name, etc.)
-         If omitted, aggregator may fill from breneo-api when BRENEO_API_BASE_URL is set.
-
-  GET    /api/users/me/applications?external_user_id=<userId>&page=1&limit=20&sort=-applied_at
-
-  DELETE /api/jobs/{jobId}/application?external_user_id=<userId>
-
---- BFF only (recruiter / employer dashboard) ---
-
-  GET    /api/jobs/{jobId}/applicants?page=1&limit=20&sort=-applied_at
-
--------------------------------------------------------------------------------
-RESPONSE SHAPE (always check success)
--------------------------------------------------------------------------------
-
-Success:
-{
-  "success": true,
-  "message": "Applications retrieved successfully",
-  "data": { ... }
-}
-
-Error:
-{
-  "success": false,
-  "message": "Human readable text",
-  "data": null,
-  "error": "already_applied"   // machine code when present
-}
-
-List endpoints wrap rows in:
-  data.items: Application[]
-  data.pagination: { page, limit, total_pages, total_items, has_next, has_previous }
-
-Applicants list also includes:
-  data.job: { id, title, company_id, company_name }
-
--------------------------------------------------------------------------------
-TYPESCRIPT
--------------------------------------------------------------------------------
-
-type ApplicationStatus = "applied" | "reviewed" | "rejected" | "accepted";
-
-interface ApiEnvelope<T> {
-  success: boolean;
-  message: string;
-  data: T | null;
-  error?: string;
-}
-
-interface JobSummary {
-  id: number;
-  title: string;
-  company_name: string;
-  company_logo: string | null;
-  location: string | null;
-  workplace_type: string | null;
-  platform: string;
-  supports_in_app_apply: boolean;
-  apply_url: string | null;
-  is_active: boolean;
-}
-
-interface JobApplication {
-  id: number;
-  user_id: string;
-  job_id: number;
-  status: ApplicationStatus;
-  applied_at: string;
-  is_withdrawn: boolean;
-  withdrawn_at: string | null;
-  job: JobSummary;
-}
-
-interface PaginatedApplications {
-  items: JobApplication[];
-  pagination: {
-    page: number;
-    limit: number;
-    total_pages: number;
-    total_items: number;
-    has_next: boolean;
-    has_previous: boolean;
-  };
-}
-
--------------------------------------------------------------------------------
-NEXT.JS BFF ROUTES (App Router) — implement these four routes
--------------------------------------------------------------------------------
-
-Shared helper (lib/job-aggregator-bff.ts):
-
-  const AGGREGATOR = process.env.JOB_AGGREGATOR_BASE_URL!;
-  const APP_KEY = process.env.EMPLOYER_POST_SECRET!;
-
-  export async function aggregatorFetch(path: string, init?: RequestInit) {
-    return fetch(`${AGGREGATOR}${path}`, {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        "X-Application-Key": APP_KEY,
-      },
-    });
-  }
+You probably only send external_user_id today. Update to send full profile from session.
 
 --- app/api/app/jobs/[jobId]/apply/route.ts ---
 
-  POST → aggregator POST /api/jobs/{jobId}/apply
-  body to aggregator: { external_user_id: sessionUserId }
+  const user = await getSessionUser(); // your existing Breneo session helper
+  if (!user?.id) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
 
---- app/api/app/users/me/applications/route.ts ---
+  const res = await fetch(`${process.env.JOB_AGGREGATOR_BASE_URL}/api/jobs/${params.jobId}/apply`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Application-Key": process.env.EMPLOYER_POST_SECRET!,
+    },
+    body: JSON.stringify({
+      external_user_id: String(user.id),
+      external_user_email: user.email ?? "",
+      external_user_name: user.firstName ?? user.name ?? "",
+      external_user_surname: user.lastName ?? user.surname ?? "",
+    }),
+  });
 
-  GET → aggregator GET /api/users/me/applications?external_user_id=...&page=&limit=20&sort=-applied_at
-  forward query param page from request
+Map from YOUR session user shape (adjust property names):
 
---- app/api/app/jobs/[jobId]/application/route.ts ---
+  | Breneo / your session | Send to aggregator        |
+  |-----------------------|---------------------------|
+  | user.id               | external_user_id          |
+  | user.email            | external_user_email       |
+  | user.firstName        | external_user_name        |
+  | user.lastName         | external_user_surname     |
 
-  DELETE → aggregator DELETE /api/jobs/{jobId}/application?external_user_id=...
-
---- app/api/app/jobs/[jobId]/applicants/route.ts (employer dashboard) ---
-
-  GET → aggregator GET /api/jobs/{jobId}/applicants?...
-  use header X-Employer-Key instead of X-Application-Key (same secret value)
-
-Session: implement getSessionUserId() from your existing Breneo login (cookie / session).
-Return 401 from BFF if no user id before calling aggregator.
+CamelCase aliases also accepted by backend if easier:
+  email, firstName, lastName
 
 -------------------------------------------------------------------------------
-BROWSER CLIENT (only calls /api/app/* on your domain)
+FIX 2 — TYPESCRIPT TYPES
 -------------------------------------------------------------------------------
 
-const applyToJob = async (jobId: number) => {
-  const res = await fetch(`/api/app/jobs/${jobId}/apply`, { method: "POST" });
-  const json: ApiEnvelope<JobApplication> = await res.json();
-  if (!json.success) {
-    if (json.error === "already_applied") return { alreadyApplied: true };
-    throw new Error(json.message);
+Extend JobApplication (or Application) interface:
+
+  interface JobApplication {
+    id: number;
+    external_user_id: string;
+    external_user_email: string;
+    external_user_name: string;
+    external_user_surname: string;
+    user_id: string;
+    user_email: string;
+    user_name: string;
+    user_surname: string;
+    job_id: number;
+    status: string;
+    applied_at: string;
+    is_withdrawn: boolean;
+    withdrawn_at: string | null;
+    job: JobSummary;
   }
-  return { data: json.data };
-};
 
-const getMyApplications = async (page = 1) => {
-  const res = await fetch(`/api/app/users/me/applications?page=${page}`);
-  const json: ApiEnvelope<PaginatedApplications> = await res.json();
-  if (!json.success) throw new Error(json.message);
-  return json.data!;
-};
+Helper for display:
 
-const withdrawApplication = async (jobId: number) => {
-  const res = await fetch(`/api/app/jobs/${jobId}/application`, { method: "DELETE" });
-  const json: ApiEnvelope<JobApplication> = await res.json();
-  if (!json.success) throw new Error(json.message);
-  return json.data;
-};
+  function applicantDisplayName(app: JobApplication) {
+    const name = app.external_user_name || app.user_name || "";
+    const surname = app.external_user_surname || app.user_surname || "";
+    return [name, surname].filter(Boolean).join(" ") || "Applicant";
+  }
 
-// Build Set of applied job ids for badges on listing:
-// const ids = new Set(applications.items.map((a) => a.job_id));
+  function applicantEmail(app: JobApplication) {
+    return app.external_user_email || app.user_email || "";
+  }
 
 -------------------------------------------------------------------------------
-REACT / UI FLOWS
+FIX 3 — UI: SHOW NAME & EMAIL
 -------------------------------------------------------------------------------
 
-Job detail page:
-  1. GET {NEXT_PUBLIC_JOB_AGGREGATOR_URL}/api/v1/jobs/{id}/  (public)
-  2. If user logged in && job.supports_in_app_apply:
-       GET /api/app/users/me/applications?page=1 (BFF)
-       show "Applied" if items.some(a => a.job_id === job.id && !a.is_withdrawn)
-  3. Apply button:
-       - supports_in_app_apply → POST /api/app/jobs/{id}/apply
-       - else → existing apply_url link only
+"My applications" list — add under job title:
 
-"My applications" page:
-  - GET /api/app/users/me/applications?page=N
-  - Render data.items[].job (title, company_name, logo, location)
-  - Show data.items[].status, data.items[].applied_at
-  - Withdraw → DELETE /api/app/jobs/{job_id}/application → refresh list
+  {applicantDisplayName(application)}
+  {applicantEmail(application) && (
+    <span className="text-muted">{applicantEmail(application)}</span>
+  )}
 
-Employer job applicants page:
-  - GET /api/app/jobs/{jobId}/applicants
-  - Table from data.items (user_id, status, applied_at, user object if present)
+For "my applications" page the name/email is the logged-in user (same on every row);
+still read from API so you verify the round-trip works.
 
-Loading / errors:
-  - Disable Apply while POST in flight
-  - Toast json.message on success: false
-  - 409 / already_applied → show "Already applied" (not a crash)
+Employer "applicants" table — columns:
+
+  | Name | Email | Applied | Status |
+  |------|-------|---------|--------|
+  | {external_user_name} {external_user_surname} | {external_user_email} | ... | ... |
+
+  item.user may also exist (merged profile) but prefer top-level:
+    item.external_user_name, item.external_user_surname, item.external_user_email
 
 -------------------------------------------------------------------------------
-HTTP STATUS CODES (from aggregator via BFF)
+FIX 4 — LIST / WITHDRAW (no body change required)
 -------------------------------------------------------------------------------
 
-  201  apply created
-  200  list / withdraw OK
-  401  missing session (BFF) or bad X-Application-Key (misconfigured server)
-  400  employer_job_only — wrong job type (UI should not offer in-app apply)
-  404  job or application not found
-  409  already_applied
+GET my applications and DELETE withdraw do NOT need email/name in the request.
+Those fields are returned in GET response for each item after apply stored them.
+
+Re-apply after withdraw updates name/email if you send them again on POST apply.
 
 -------------------------------------------------------------------------------
-EXAMPLE AGGREGATOR RESPONSE — GET my applications
+EXAMPLE RESPONSE — POST apply & GET my applications
 -------------------------------------------------------------------------------
 
 {
   "success": true,
-  "message": "Applications retrieved successfully",
+  "message": "Application submitted successfully",
   "data": {
-    "items": [
-      {
-        "id": 1,
-        "user_id": "user-abc",
-        "job_id": 42,
-        "status": "applied",
-        "applied_at": "2026-05-17T12:00:00Z",
-        "is_withdrawn": false,
-        "job": {
-          "id": 42,
-          "title": "Backend Engineer",
-          "company_name": "Acme",
-          "supports_in_app_apply": true
-        }
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "limit": 20,
-      "total_pages": 1,
-      "total_items": 1,
-      "has_next": false,
-      "has_previous": false
-    }
+    "id": 7,
+    "external_user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "external_user_email": "jane@example.com",
+    "external_user_name": "Jane",
+    "external_user_surname": "Doe",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_email": "jane@example.com",
+    "user_name": "Jane",
+    "user_surname": "Doe",
+    "job_id": 42,
+    "status": "applied",
+    "applied_at": "2026-05-17T14:30:00Z",
+    "job": { "title": "Backend Engineer", "company_name": "Acme", ... }
   }
 }
 
--------------------------------------------------------------------------------
-CHECKLIST
--------------------------------------------------------------------------------
-
-[ ] NEXT_PUBLIC_JOB_AGGREGATOR_URL for public job GETs only
-[ ] BFF routes under /api/app/... with EMPLOYER_POST_SECRET server-side
-[ ] getSessionUserId() wired to Breneo login
-[ ] supports_in_app_apply controls Apply vs external link
-[ ] Fetched jobs: apply_url link unchanged
-[ ] Parse json.success; use data.items for lists
-[ ] React Query (or similar): invalidate ["my-applications"] after apply/withdraw
+If you see empty strings for email/name/surname after apply:
+  → BFF is not sending them in POST body (Fix 1)
+  → or session user object has no email/firstName/lastName (fix session mapping)
 
 -------------------------------------------------------------------------------
-REFERENCE
+QUICK DEBUG CHECKLIST
 -------------------------------------------------------------------------------
 
-Postman collection (QA): postman/breneo-job-applications.postman_collection.json
-OpenAPI: {JOB_AGGREGATOR_URL}/api/docs/  (tag: Job applications)
+[ ] Log session user in BFF before apply — confirm email, firstName, lastName exist
+[ ] Log JSON body sent to job-aggregator — must include 4 fields
+[ ] Apply once in UI, then GET my applications — items must show non-empty email/name
+[ ] Old applications created before this feature may have "" for name/email (expected)
+
+-------------------------------------------------------------------------------
+REST OF INTEGRATION (unchanged)
+-------------------------------------------------------------------------------
+
+• Browser → /api/app/* only; BFF adds X-Application-Key
+• Public jobs: NEXT_PUBLIC_JOB_AGGREGATOR_URL
+• supports_in_app_apply === true → in-app apply; false → keep apply_url link
+• Envelope: { success, message, data }
+
+Postman reference body:
+  postman/breneo-job-applications.postman_collection.json  → request "2. POST apply (BFF)"
 
 End of prompt.

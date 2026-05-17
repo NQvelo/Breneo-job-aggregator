@@ -29,7 +29,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"external_user_email\": \"jane.doe@example.com\",\n  \"external_user_name\": \"Jane\",\n  \"external_user_surname\": \"Doe\"\n}",
+          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"external_user_email\": \"jane.doe@example.com\",\n  \"external_user_name\": \"Jane\",\n  \"external_user_surname\": \"Doe\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"email\": \"jane.doe@example.com\"\n}"
           "options": { "raw": { "language": "json" } }
         },
         "url": "{{baseUrl}}/api/jobs/{{jobId}}/apply"

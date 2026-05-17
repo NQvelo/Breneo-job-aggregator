@@ -42,6 +42,7 @@ def applicant_profile_from_request(request) -> ApplicantProfile:
         "external_user_name",
         "user_name",
         "first_name",
+        "firstName",
         "name",
     ) or _header(request, "X-Breneo-User-Name")
     surname = external_user_field_from_request(
@@ -49,6 +50,7 @@ def applicant_profile_from_request(request) -> ApplicantProfile:
         "external_user_surname",
         "user_surname",
         "last_name",
+        "lastName",
         "surname",
     ) or _header(request, "X-Breneo-User-Surname")
     return ApplicantProfile(
