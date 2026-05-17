@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 from .api_response import error_response, success_response
 from .application_exceptions import JobApplicationError
-from .authentication import ApplicationUserRequiredAuthentication, get_application_user_id
+from .authentication import ApplicationBFFRequiredAuthentication, get_application_user_id
 from .breneo_user import external_user_id_from_request
 from .pagination import ApplicationPagination
 from .permissions import CanViewJobApplicants, IsApplicationUserAuthenticated
@@ -41,27 +41,20 @@ APPLICATION_SORT_PARAMS = [
     ),
 ]
 
-APPLICATION_AUTH_HEADERS = [
+APPLICATION_BFF_PARAMS = [
     OpenApiParameter(
-        name="X-Breneo-User-Id",
+        name="X-Application-Key",
         type=str,
         location=OpenApiParameter.HEADER,
         required=True,
-        description="Breneo user id (from login/me applicationAuth)",
+        description="Server secret (APPLICATION_API_SECRET). BFF only — never in browser.",
     ),
     OpenApiParameter(
-        name="X-Breneo-Timestamp",
+        name="external_user_id",
         type=str,
-        location=OpenApiParameter.HEADER,
-        required=True,
-        description="Unix timestamp used when signing",
-    ),
-    OpenApiParameter(
-        name="X-Breneo-Signature",
-        type=str,
-        location=OpenApiParameter.HEADER,
-        required=True,
-        description="HMAC-SHA256 signature from breneo-api (shared secret with aggregator)",
+        location=OpenApiParameter.QUERY,
+        required=False,
+        description="Breneo user id (query, body, or X-Breneo-User-Id header)",
     ),
 ]
 
@@ -141,17 +134,17 @@ class JobApplyView(JobApplicationBaseView):
     In-app apply for Breneo employer-posted jobs only (platform=employer).
     """
 
-    authentication_classes = [ApplicationUserRequiredAuthentication]
+    authentication_classes = [ApplicationBFFRequiredAuthentication]
     permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
         summary="Apply to a Breneo employer job",
         description=(
-            "Creates a row in `job_applications`. Auth: signed headers from breneo login "
-            "(not Bearer JWT). Only jobs with platform=employer. Fetched ATS jobs use apply_url."
+            "BFF/server only: X-Application-Key + external_user_id. "
+            "Only jobs with platform=employer. Fetched ATS jobs use apply_url."
         ),
-        parameters=APPLICATION_AUTH_HEADERS,
+        parameters=APPLICATION_BFF_PARAMS,
         responses={201: _envelope, 400: _envelope, 401: _envelope, 404: _envelope, 409: _envelope},
     )
     def post(self, request, job_id: int):
@@ -175,13 +168,13 @@ class JobApplyView(JobApplicationBaseView):
 class JobWithdrawApplicationView(JobApplicationBaseView):
     """DELETE /api/jobs/<job_id>/application — withdraw in-app application."""
 
-    authentication_classes = [ApplicationUserRequiredAuthentication]
+    authentication_classes = [ApplicationBFFRequiredAuthentication]
     permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
         summary="Withdraw application",
-        parameters=APPLICATION_AUTH_HEADERS,
+        parameters=APPLICATION_BFF_PARAMS,
         responses={200: _envelope, 401: _envelope, 404: _envelope},
     )
     def delete(self, request, job_id: int):
@@ -204,13 +197,13 @@ class JobWithdrawApplicationView(JobApplicationBaseView):
 class UserApplicationsView(JobApplicationBaseView):
     """GET /api/users/me/applications — list user's in-app applications."""
 
-    authentication_classes = [ApplicationUserRequiredAuthentication]
+    authentication_classes = [ApplicationBFFRequiredAuthentication]
     permission_classes = [IsApplicationUserAuthenticated]
 
     @extend_schema(
         tags=["Job applications"],
         summary="List my applications",
-        parameters=APPLICATION_SORT_PARAMS + APPLICATION_AUTH_HEADERS,
+        parameters=APPLICATION_SORT_PARAMS + APPLICATION_BFF_PARAMS,
         responses={200: _envelope, 401: _envelope},
     )
     def get(self, request):

@@ -1,0 +1,86 @@
+{
+  "info": {
+    "name": "Breneo Job Aggregator — Job Applications (BFF safe mode)",
+    "description": "Server-to-server only. Set variables then run.\n\n**Railway (job-aggregator):**\n- `APPLICATION_API_SECRET` or `EMPLOYER_POST_SECRET`\n\n**Postman:**\n- `applicationKey` = same secret\n- `breneoUserId` = user id from breneo session\n- `jobId` = employer job (`supports_in_app_apply: true`)\n\n**Never** call these from the browser with the secret.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://breneo-job-aggregator.up.railway.app" },
+    { "key": "applicationKey", "value": "PASTE_APPLICATION_API_SECRET_OR_EMPLOYER_POST_SECRET" },
+    { "key": "breneoUserId", "value": "your-breneo-user-id" },
+    { "key": "jobId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "1. GET job (check supports_in_app_apply)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/v1/jobs/{{jobId}}/"
+      }
+    },
+    {
+      "name": "2. POST apply (BFF)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Application-Key", "value": "{{applicationKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/jobs/{{jobId}}/apply"
+      }
+    },
+    {
+      "name": "3. GET my applications (BFF)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Application-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/users/me/applications?external_user_id={{breneoUserId}}&sort=-applied_at&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "users", "me", "applications"],
+          "query": [
+            { "key": "external_user_id", "value": "{{breneoUserId}}" },
+            { "key": "sort", "value": "-applied_at" },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. DELETE withdraw (BFF)",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "X-Application-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/jobs/{{jobId}}/application?external_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "jobs", "{{jobId}}", "application"],
+          "query": [{ "key": "external_user_id", "value": "{{breneoUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "5. GET applicants (recruiter)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Employer-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/jobs/{{jobId}}/applicants?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "jobs", "{{jobId}}", "applicants"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -98,23 +98,20 @@ API_GROUPS = [
                 "methods": ["POST"],
                 "path": "/api/jobs/{job_id}/apply",
                 "description": (
-                    "Apply to a Breneo employer job (platform=employer only). Auth: "
-                    "X-Breneo-User-Id + X-Breneo-Timestamp + X-Breneo-Signature from breneo login "
-                    "(shared HMAC secret, not Bearer JWT). Envelope: { success, message, data }."
+                    "Apply to employer job (platform=employer). BFF only: X-Application-Key + "
+                    "external_user_id. Never from browser. Envelope: { success, message, data }."
                 ),
             },
             {
                 "methods": ["DELETE"],
                 "path": "/api/jobs/{job_id}/application",
-                "description": (
-                    "Withdraw application (soft delete). Same signed headers as apply."
-                ),
+                "description": "Withdraw application. BFF: X-Application-Key + external_user_id.",
             },
             {
                 "methods": ["GET"],
                 "path": "/api/users/me/applications",
                 "description": (
-                    "List current user's applications. Signed headers. Query: sort, page, limit."
+                    "List applications. BFF: X-Application-Key + external_user_id. Query: sort, page, limit."
                 ),
             },
             {

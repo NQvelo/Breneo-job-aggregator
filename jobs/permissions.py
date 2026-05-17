@@ -7,11 +7,11 @@ from jobs.authentication.application_auth import ApplicationUser
 
 
 class IsApplicationUserAuthenticated(BasePermission):
-    """Require signed application headers or BFF X-Application-Key + external_user_id."""
+    """Require BFF auth (ApplicationUser set by ApplicationBFFRequiredAuthentication)."""
 
     message = (
-        "Application auth required. Send X-Breneo-User-Id, X-Breneo-Timestamp, "
-        "and X-Breneo-Signature from breneo login response."
+        "Application auth required. Call from your server with X-Application-Key and "
+        "external_user_id (never from the browser)."
     )
 
     def has_permission(self, request, view):

@@ -299,10 +299,9 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-# Job applications: HMAC signed headers (same secret on breneo-api + job-aggregator).
-# breneo-api login/me returns applicationAuth { userId, timestamp, signature } for the frontend.
-# APPLICATION_SIGNATURE_SECRET — shared signing key (not a Bearer JWT).
-# APPLICATION_SIGNATURE_MAX_AGE_SECONDS — default 900 (15 minutes).
+# Job applications (BFF safe mode): server calls only.
+# APPLICATION_API_SECRET — X-Application-Key header (falls back to EMPLOYER_POST_SECRET).
+# Browser must use your Next.js API routes; never expose this secret in NEXT_PUBLIC_*.
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Breneo Job Aggregator API",
