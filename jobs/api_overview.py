@@ -91,6 +91,35 @@ API_GROUPS = [
         ],
     },
     {
+        "id": "applications",
+        "title": "Job applications",
+        "endpoints": [
+            {
+                "methods": ["POST"],
+                "path": "/api/jobs/{job_id}/apply",
+                "description": (
+                    "Apply to a job. Body or query: external_user_id / user_id / staff_user_id "
+                    "(Breneo user id). 409 if already applied."
+                ),
+            },
+            {
+                "methods": ["GET"],
+                "path": "/api/users/me/applications",
+                "description": (
+                    "List current user's applications. Query: external_user_id / user_id / staff_user_id."
+                ),
+            },
+            {
+                "methods": ["GET"],
+                "path": "/api/jobs/{job_id}/applicants",
+                "description": (
+                    "List applicants (employer: X-Employer-Key or Employer group). "
+                    "Optional ?external_user_id= scopes to company staff."
+                ),
+            },
+        ],
+    },
+    {
         "id": "cron",
         "title": "Operations",
         "endpoints": [

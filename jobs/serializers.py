@@ -7,6 +7,7 @@ from .models import (
     Company,
     CompanyStaffMembership,
     Industry,
+    JobApplication,
     SENIORITY_CHOICES,
     VISA_SPONSORSHIP_CHOICES,
     WORK_AUTH_CHOICES,
@@ -521,3 +522,64 @@ def job_to_dict(job):
             "is_active": job.get("is_active", True),
             "raw": job.get("raw"),
         }
+
+
+class JobApplicationJobSummarySerializer(serializers.ModelSerializer):
+    """Nested job summary on application responses."""
+
+    company_name = serializers.CharField(source="company.name", read_only=True)
+
+    class Meta:
+        model = Job
+        fields = [
+            "id",
+            "title",
+            "company",
+            "company_name",
+            "location",
+            "workplace_type",
+            "platform",
+            "is_active",
+        ]
+
+
+class JobApplicationSerializer(serializers.ModelSerializer):
+    """User-facing application record (includes nested job)."""
+
+    user_id = serializers.CharField(source="external_user_id", read_only=True)
+    job_id = serializers.IntegerField(source="job.id", read_only=True)
+    job = JobApplicationJobSummarySerializer(read_only=True)
+
+    class Meta:
+        model = JobApplication
+        fields = [
+            "id",
+            "user_id",
+            "job_id",
+            "job",
+            "applied_at",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class JobApplicantSerializer(serializers.ModelSerializer):
+    """Employer view: applicant rows without full job nesting."""
+
+    user_id = serializers.CharField(source="external_user_id", read_only=True)
+    job_id = serializers.IntegerField(source="job.id", read_only=True)
+
+    class Meta:
+        model = JobApplication
+        fields = [
+            "id",
+            "user_id",
+            "job_id",
+            "applied_at",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

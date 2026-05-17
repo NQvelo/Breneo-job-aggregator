@@ -20,6 +20,11 @@ from .employer_company_views import (
     EmployerStaffMembershipListCreateView,
     EmployerStaffMembershipDetailView,
 )
+from .job_application_views import (
+    JobApplyView,
+    UserApplicationsView,
+    JobApplicantsView,
+)
 
 urlpatterns = [
     path('overview/', ApiOverviewView.as_view(), name='api_overview'),
@@ -51,6 +56,9 @@ urlpatterns = [
         EmployerCompanyDetailView.as_view(),
         name='employer_company_detail',
     ),
+    path('users/me/applications', UserApplicationsView.as_view(), name='user_applications'),
+    path('jobs/<int:job_id>/apply', JobApplyView.as_view(), name='job_apply'),
+    path('jobs/<int:job_id>/applicants', JobApplicantsView.as_view(), name='job_applicants'),
     path('jobs/parse-description', ParseJobDescriptionView.as_view(), name='parse_job_description'),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
     path('employer/jobs/<int:job_id>', EmployerJobDetailView.as_view(), name='employer_job_detail'),

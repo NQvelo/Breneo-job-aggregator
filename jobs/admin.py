@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Job, Company, CompanyStaffMembership, Industry
+from .models import Job, Company, CompanyStaffMembership, Industry, JobApplication
 
 
 class JobAdminForm(forms.ModelForm):
@@ -12,6 +12,16 @@ class JobAdminForm(forms.ModelForm):
             "location": "City",
             "location_country": "Country",
         }
+
+
+@admin.register(JobApplication)
+class JobApplicationAdmin(admin.ModelAdmin):
+    list_display = ("external_user_id", "job", "status", "applied_at", "created_at")
+    list_filter = ("status",)
+    search_fields = ("external_user_id", "job__title", "job__company__name")
+    list_select_related = ("job", "job__company")
+    autocomplete_fields = ("job",)
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(CompanyStaffMembership)

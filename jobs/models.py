@@ -32,6 +32,13 @@ WORK_AUTH_CHOICES = [
     ("unknown", "Unknown"),
 ]
 
+APPLICATION_STATUS_CHOICES = [
+    ("applied", "Applied"),
+    ("reviewed", "Reviewed"),
+    ("rejected", "Rejected"),
+    ("accepted", "Accepted"),
+]
+
 
 class Industry(models.Model):
     """Canonical industry list for companies (managed in admin or via API)."""
@@ -164,6 +171,43 @@ class CompanyStaffMembership(models.Model):
 
     def __str__(self) -> str:
         return f"{self.company_id}:{self.external_user_id}"
+
+
+class JobApplication(models.Model):
+    """Tracks which breneo-api users applied to which jobs."""
+
+    external_user_id = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="User id from breneo-api (string)",
+    )
+    job = models.ForeignKey(
+        "Job",
+        on_delete=models.CASCADE,
+        related_name="applications",
+    )
+    applied_at = models.DateTimeField(help_text="When the user applied")
+    status = models.CharField(
+        max_length=20,
+        choices=APPLICATION_STATUS_CHOICES,
+        default="applied",
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "job_applications"
+        ordering = ["-applied_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["external_user_id", "job"],
+                name="uniq_job_application_user_job",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.external_user_id} → job {self.job_id} ({self.status})"
 
 
 class Job(models.Model):
