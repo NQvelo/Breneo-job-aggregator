@@ -299,6 +299,18 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Breneo-api authentication (job applications and other protected user routes)
+BRENEO_AUTH_DEV_TOKEN_PREFIX = os.environ.get("BRENEO_AUTH_DEV_TOKEN_PREFIX", "dev:")
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Breneo Job Aggregator API",
+    "DESCRIPTION": "Job board, employer CMS, and job application APIs.",
+    "VERSION": "1.0.0",
+    "TAGS": [
+        {"name": "Job applications", "description": "Apply, list, withdraw, and recruiter applicant views"},
+    ],
+}
+
 # Gemini (employer job description parsing — backend only). Set the key in the environment, e.g.:
 #   export GEMINI_API_KEY="your-key"          # local shell
 #   Railway/Render: add GEMINI_API_KEY in the service Variables / Secrets UI

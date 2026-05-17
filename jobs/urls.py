@@ -22,6 +22,7 @@ from .employer_company_views import (
 )
 from .job_application_views import (
     JobApplyView,
+    JobWithdrawApplicationView,
     UserApplicationsView,
     JobApplicantsView,
 )
@@ -58,6 +59,7 @@ urlpatterns = [
     ),
     path('users/me/applications', UserApplicationsView.as_view(), name='user_applications'),
     path('jobs/<int:job_id>/apply', JobApplyView.as_view(), name='job_apply'),
+    path('jobs/<int:job_id>/application', JobWithdrawApplicationView.as_view(), name='job_withdraw_application'),
     path('jobs/<int:job_id>/applicants', JobApplicantsView.as_view(), name='job_applicants'),
     path('jobs/parse-description', ParseJobDescriptionView.as_view(), name='parse_job_description'),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),

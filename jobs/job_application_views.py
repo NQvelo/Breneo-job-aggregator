@@ -1,150 +1,300 @@
-"""Job application API: apply to jobs, list user applications, list applicants (employer)."""
+"""Job application REST API (apply, list, withdraw, recruiter applicants)."""
 
-from django.db import IntegrityError
-from django.utils import timezone
-from rest_framework import status
-from rest_framework.response import Response
+from __future__ import annotations
+
+import logging
+
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers as drf_serializers, status
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, PermissionDenied
 from rest_framework.views import APIView
 
+from .api_response import error_response, success_response
+from .application_exceptions import JobApplicationError
+from .authentication import BreneoJWTRequiredAuthentication, get_breneo_user_id
 from .breneo_user import external_user_id_from_request
-from .models import CompanyStaffMembership, Job, JobApplication
-from .permissions import CanViewJobApplicants
-from .serializers import JobApplicationSerializer, JobApplicantSerializer
+from .pagination import ApplicationPagination
+from .permissions import CanViewJobApplicants, IsBreneoAuthenticated
+from .serializers import JobApplicantSerializer, JobApplicationSerializer
+from .services.job_applications import JobApplicationService
+
+logger = logging.getLogger(__name__)
+
+APPLICATION_SORT_PARAMS = [
+    OpenApiParameter(
+        name="sort",
+        type=str,
+        location=OpenApiParameter.QUERY,
+        description="Sort field: applied_at, -applied_at, created_at, -created_at, status, -status",
+    ),
+    OpenApiParameter(
+        name="limit",
+        type=int,
+        location=OpenApiParameter.QUERY,
+        description="Page size (default 20, max 100)",
+    ),
+    OpenApiParameter(
+        name="page",
+        type=int,
+        location=OpenApiParameter.QUERY,
+        description="Page number",
+    ),
+]
+
+_envelope = inline_serializer(
+    name="ApplicationSuccessEnvelope",
+    fields={
+        "success": drf_serializers.BooleanField(),
+        "message": drf_serializers.CharField(),
+        "data": drf_serializers.JSONField(),
+    },
+)
 
 
-def _require_user_id(request) -> tuple[str | None, Response | None]:
-    uid = external_user_id_from_request(request)
-    if not uid:
-        return None, Response(
-            {
-                "error": "user_id required",
-                "message": (
-                    "Provide external_user_id, user_id, or staff_user_id "
-                    "in query or request body (Breneo user id)."
-                ),
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    return uid, None
+class JobApplicationBaseView(APIView):
+    service_class = JobApplicationService
+    pagination_class = ApplicationPagination
+
+    def get_service(self) -> JobApplicationService:
+        return self.service_class()
+
+    def get_paginator(self):
+        return self.pagination_class()
+
+    def paginate_queryset(self, request, queryset):
+        paginator = self.get_paginator()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator, page
+
+    def _sort_param(self, request) -> str:
+        sort = (request.query_params.get("sort") or "-applied_at").strip()
+        allowed = JobApplicationService().repo.SORT_FIELDS
+        return sort if sort in allowed else "-applied_at"
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (AuthenticationFailed, NotAuthenticated)):
+            detail = exc.detail
+            if isinstance(detail, list):
+                message = "; ".join(str(d) for d in detail)
+            else:
+                message = str(detail)
+            return error_response(
+                message,
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                error="not_authenticated",
+            )
+        if isinstance(exc, PermissionDenied):
+            detail = exc.detail
+            message = str(detail) if not isinstance(detail, list) else "; ".join(str(d) for d in detail)
+            return error_response(
+                message,
+                status_code=status.HTTP_403_FORBIDDEN,
+                error="forbidden",
+            )
+        if isinstance(exc, JobApplicationError):
+            return error_response(
+                exc.message,
+                status_code=exc.status_code,
+                error=exc.error_code,
+                details=exc.details,
+            )
+        response = super().handle_exception(exc)
+        if response is not None and hasattr(response, "data"):
+            if isinstance(response.data, dict) and "success" not in response.data:
+                message = response.data.get("message") or response.data.get("detail") or "Request failed"
+                return error_response(
+                    str(message),
+                    status_code=response.status_code,
+                    error=response.data.get("error"),
+                    details=response.data.get("details"),
+                )
+        return response
 
 
-def _job_or_404(job_id: int) -> Job | Response:
-    job = Job.objects.filter(pk=job_id).select_related("company").first()
-    if not job:
-        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
-    return job
-
-
-class JobApplyView(APIView):
+class JobApplyView(JobApplicationBaseView):
     """
     POST /api/jobs/<job_id>/apply
-    Create an application for the current breneo user.
+    Apply to a job (authenticated breneo user).
     """
 
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [BreneoJWTRequiredAuthentication]
+    permission_classes = [IsBreneoAuthenticated]
 
+    @extend_schema(
+        tags=["Job applications"],
+        summary="Apply to a job",
+        description=(
+            "Creates a row in `job_applications` for the authenticated user. "
+            "Requires `Authorization: Bearer <breneo-api JWT>`. Returns 409 if already applied."
+        ),
+        responses={201: _envelope, 400: _envelope, 401: _envelope, 404: _envelope, 409: _envelope},
+    )
     def post(self, request, job_id: int):
-        uid, err = _require_user_id(request)
-        if err:
-            return err
-
-        job = _job_or_404(job_id)
-        if isinstance(job, Response):
-            return job
-        if not job.is_active:
-            return Response(
-                {"error": "Job is not accepting applications"},
-                status=status.HTTP_400_BAD_REQUEST,
+        user_id = get_breneo_user_id(request)
+        if not user_id:
+            return error_response(
+                "Authentication required",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                error="not_authenticated",
             )
-
-        if JobApplication.objects.filter(external_user_id=uid, job=job).exists():
-            return Response(
-                {
-                    "error": "Already applied",
-                    "message": "You have already applied to this job.",
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        now = timezone.now()
         try:
-            application = JobApplication.objects.create(
-                external_user_id=uid,
-                job=job,
-                applied_at=now,
-                status="applied",
+            application = self.get_service().apply(user_id, job_id)
+        except JobApplicationError as exc:
+            return error_response(
+                exc.message,
+                status_code=exc.status_code,
+                error=exc.error_code,
+                details=exc.details,
             )
-        except IntegrityError:
-            return Response(
-                {
-                    "error": "Already applied",
-                    "message": "You have already applied to this job.",
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        return Response(
-            JobApplicationSerializer(application).data,
-            status=status.HTTP_201_CREATED,
+        return success_response(
+            JobApplicationSerializer(application, context={"request": request}).data,
+            message="Application submitted successfully",
+            status_code=status.HTTP_201_CREATED,
         )
 
 
-class UserApplicationsView(APIView):
+class JobWithdrawApplicationView(JobApplicationBaseView):
+    """
+    DELETE /api/jobs/<job_id>/application
+    Withdraw the current user's application (soft delete).
+    """
+
+    authentication_classes = [BreneoJWTRequiredAuthentication]
+    permission_classes = [IsBreneoAuthenticated]
+
+    @extend_schema(
+        tags=["Job applications"],
+        summary="Withdraw application",
+        description="Soft-deletes the application by setting `withdrawn_at`.",
+        responses={200: _envelope, 401: _envelope, 404: _envelope},
+    )
+    def delete(self, request, job_id: int):
+        user_id = get_breneo_user_id(request)
+        if not user_id:
+            return error_response(
+                "Authentication required",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                error="not_authenticated",
+            )
+        try:
+            application = self.get_service().withdraw(user_id, job_id)
+        except JobApplicationError as exc:
+            return error_response(
+                exc.message,
+                status_code=exc.status_code,
+                error=exc.error_code,
+                details=exc.details,
+            )
+        return success_response(
+            JobApplicationSerializer(application, context={"request": request}).data,
+            message="Application withdrawn successfully",
+        )
+
+
+class UserApplicationsView(JobApplicationBaseView):
     """
     GET /api/users/me/applications
-    List applications for the current breneo user.
+    List jobs the authenticated user applied to (paginated).
     """
 
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [BreneoJWTRequiredAuthentication]
+    permission_classes = [IsBreneoAuthenticated]
 
+    @extend_schema(
+        tags=["Job applications"],
+        summary="List my applications",
+        parameters=APPLICATION_SORT_PARAMS,
+        responses={200: _envelope, 401: _envelope},
+    )
     def get(self, request):
-        uid, err = _require_user_id(request)
-        if err:
-            return err
-
-        qs = (
-            JobApplication.objects.filter(external_user_id=uid)
-            .select_related("job", "job__company")
-            .order_by("-applied_at", "-id")
+        user_id = get_breneo_user_id(request)
+        if not user_id:
+            return error_response(
+                "Authentication required",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                error="not_authenticated",
+            )
+        qs = self.get_service().list_user_applications(user_id, sort=self._sort_param(request))
+        paginator, page = self.paginate_queryset(request, qs)
+        if page is not None:
+            data = JobApplicationSerializer(
+                page, many=True, context={"request": request}
+            ).data
+            return paginator.build_response(
+                data,
+                message="Applications retrieved successfully",
+            )
+        data = JobApplicationSerializer(qs, many=True, context={"request": request}).data
+        return success_response(
+            {"items": data, "pagination": None},
+            message="Applications retrieved successfully",
         )
-        return Response(JobApplicationSerializer(qs, many=True).data)
 
 
-class JobApplicantsView(APIView):
+class JobApplicantsView(JobApplicationBaseView):
     """
     GET /api/jobs/<job_id>/applicants
-    Employer/recruiter: list applicants for a job (requires employer auth).
+    Recruiter/admin: applicants for a job (paginated, with user profiles).
     """
 
     authentication_classes = []
     permission_classes = [CanViewJobApplicants]
 
+    @extend_schema(
+        tags=["Job applications"],
+        summary="List job applicants (recruiter)",
+        description=(
+            "Requires `X-Employer-Key` or Employer Django group. "
+            "Optional `?external_user_id=` scopes to company staff."
+        ),
+        parameters=APPLICATION_SORT_PARAMS
+        + [
+            OpenApiParameter(
+                name="external_user_id",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+            ),
+        ],
+        responses={200: _envelope, 403: _envelope, 404: _envelope},
+    )
     def get(self, request, job_id: int):
-        job = _job_or_404(job_id)
-        if isinstance(job, Response):
-            return job
-
-        if not self._staff_access(request, job):
-            return Response(
-                {"error": "Forbidden", "message": "Not authorized for this company's jobs."},
-                status=status.HTTP_403_FORBIDDEN,
+        scoped_uid = external_user_id_from_request(request) or get_breneo_user_id(request)
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip() or None
+        try:
+            applications, profiles, job = self.get_service().list_job_applicants(
+                job_id,
+                requester_user_id=scoped_uid or None,
+                sort=self._sort_param(request),
+                auth_token=token if isinstance(token, str) else None,
+            )
+        except JobApplicationError as exc:
+            return error_response(
+                exc.message,
+                status_code=exc.status_code,
+                error=exc.error_code,
+                details=exc.details,
             )
 
-        qs = (
-            JobApplication.objects.filter(job=job)
-            .select_related("job", "job__company")
-            .order_by("-applied_at", "-id")
-        )
-        return Response(JobApplicantSerializer(qs, many=True).data)
-
-    def _staff_access(self, request, job: Job) -> bool:
-        """When external user id is sent, require staff on the job's company."""
-        uid = external_user_id_from_request(request)
-        if not uid:
-            return True
-        return CompanyStaffMembership.objects.filter(
-            company=job.company,
-            external_user_id=uid,
-        ).exists()
+        paginator, page = self.paginate_queryset(request, applications)
+        serializer_ctx = {"request": request, "user_profiles": profiles}
+        if page is not None:
+            data = JobApplicantSerializer(page, many=True, context=serializer_ctx).data
+            response = paginator.build_response(
+                data,
+                message="Applicants retrieved successfully",
+            )
+        else:
+            data = JobApplicantSerializer(applications, many=True, context=serializer_ctx).data
+            response = success_response(
+                {"items": data, "pagination": None},
+                message="Applicants retrieved successfully",
+            )
+        if isinstance(response.data.get("data"), dict):
+            response.data["data"]["job"] = {
+                "id": job.id,
+                "title": job.title,
+                "company_id": job.company_id,
+                "company_name": job.company.name if job.company_id else None,
+            }
+        return response

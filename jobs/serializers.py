@@ -524,10 +524,11 @@ def job_to_dict(job):
         }
 
 
-class JobApplicationJobSummarySerializer(serializers.ModelSerializer):
-    """Nested job summary on application responses."""
+class JobApplicationJobSummarySerializer(JobCityCountryFieldsMixin, serializers.ModelSerializer):
+    """Nested job details for application list responses."""
 
     company_name = serializers.CharField(source="company.name", read_only=True)
+    company_logo = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
@@ -536,11 +537,27 @@ class JobApplicationJobSummarySerializer(serializers.ModelSerializer):
             "title",
             "company",
             "company_name",
+            "company_logo",
             "location",
+            "location_country",
+            "city",
+            "country",
             "workplace_type",
+            "work_mode",
+            "seniority",
+            "salary",
+            "apply_url",
             "platform",
+            "posted_at",
             "is_active",
         ]
+
+    def get_company_logo(self, obj):
+        from jobs.logo_url import resolved_company_logo_url
+
+        if obj.company:
+            return resolved_company_logo_url(obj.company, self.context.get("request"))
+        return None
 
 
 class JobApplicationSerializer(serializers.ModelSerializer):
@@ -549,6 +566,7 @@ class JobApplicationSerializer(serializers.ModelSerializer):
     user_id = serializers.CharField(source="external_user_id", read_only=True)
     job_id = serializers.IntegerField(source="job.id", read_only=True)
     job = JobApplicationJobSummarySerializer(read_only=True)
+    is_withdrawn = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = JobApplication
@@ -559,6 +577,8 @@ class JobApplicationSerializer(serializers.ModelSerializer):
             "job",
             "applied_at",
             "status",
+            "is_withdrawn",
+            "withdrawn_at",
             "created_at",
             "updated_at",
         ]
@@ -566,16 +586,18 @@ class JobApplicationSerializer(serializers.ModelSerializer):
 
 
 class JobApplicantSerializer(serializers.ModelSerializer):
-    """Employer view: applicant rows without full job nesting."""
+    """Employer view: applicant with optional breneo user profile."""
 
     user_id = serializers.CharField(source="external_user_id", read_only=True)
     job_id = serializers.IntegerField(source="job.id", read_only=True)
+    user = serializers.SerializerMethodField()
 
     class Meta:
         model = JobApplication
         fields = [
             "id",
             "user_id",
+            "user",
             "job_id",
             "applied_at",
             "status",
@@ -583,3 +605,7 @@ class JobApplicantSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_user(self, obj):
+        profiles = self.context.get("user_profiles") or {}
+        return profiles.get(obj.external_user_id) or {"id": obj.external_user_id}

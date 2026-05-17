@@ -193,8 +193,17 @@ class JobApplication(models.Model):
         default="applied",
         blank=True,
     )
+    withdrawn_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set when the user withdraws the application (soft delete)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def is_withdrawn(self) -> bool:
+        return self.withdrawn_at is not None
 
     class Meta:
         db_table = "job_applications"

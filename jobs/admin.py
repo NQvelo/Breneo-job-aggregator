@@ -16,7 +16,7 @@ class JobAdminForm(forms.ModelForm):
 
 @admin.register(JobApplication)
 class JobApplicationAdmin(admin.ModelAdmin):
-    list_display = ("external_user_id", "job", "status", "applied_at", "created_at")
+    list_display = ("external_user_id", "job", "status", "applied_at", "withdrawn_at", "created_at")
     list_filter = ("status",)
     search_fields = ("external_user_id", "job__title", "job__company__name")
     list_select_related = ("job", "job__company")

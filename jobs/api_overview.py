@@ -98,23 +98,33 @@ API_GROUPS = [
                 "methods": ["POST"],
                 "path": "/api/jobs/{job_id}/apply",
                 "description": (
-                    "Apply to a job. Body or query: external_user_id / user_id / staff_user_id "
-                    "(Breneo user id). 409 if already applied."
+                    "Apply to a job. Auth: Authorization: Bearer <breneo-api JWT>. "
+                    "Response envelope: { success, message, data }. 409 if already applied."
+                ),
+            },
+            {
+                "methods": ["DELETE"],
+                "path": "/api/jobs/{job_id}/application",
+                "description": (
+                    "Withdraw application (soft delete via withdrawn_at). "
+                    "Auth: Bearer <breneo-api JWT>."
                 ),
             },
             {
                 "methods": ["GET"],
                 "path": "/api/users/me/applications",
                 "description": (
-                    "List current user's applications. Query: external_user_id / user_id / staff_user_id."
+                    "List current user's applications with job details. "
+                    "Auth: Bearer. Query: sort, page, limit."
                 ),
             },
             {
                 "methods": ["GET"],
                 "path": "/api/jobs/{job_id}/applicants",
                 "description": (
-                    "List applicants (employer: X-Employer-Key or Employer group). "
-                    "Optional ?external_user_id= scopes to company staff."
+                    "List applicants with user profiles. "
+                    "Auth: X-Employer-Key or Employer group. Optional ?external_user_id=. "
+                    "Query: sort, page, limit."
                 ),
             },
         ],

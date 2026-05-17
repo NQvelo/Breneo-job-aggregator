@@ -48,6 +48,7 @@ duckduckgo-search>=6.0.0
 dj-database-url>=2.1.0
 psycopg2-binary>=2.9.9
 drf-spectacular>=0.27.0
+PyJWT>=2.8.0
 Pillow>=10.0.0
 cloudinary>=1.36.0
 django-cloudinary-storage>=0.3.0
