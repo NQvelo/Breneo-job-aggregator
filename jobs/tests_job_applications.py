@@ -52,13 +52,23 @@ class JobApplicationAPITests(TestCase):
         url = reverse("job_apply", kwargs={"job_id": self.job.id})
         response = self.client.post(
             url,
-            {"external_user_id": self.user_id},
+            {
+                "external_user_id": self.user_id,
+                "external_user_email": "jane@example.com",
+                "external_user_name": "Jane",
+                "external_user_surname": "Doe",
+            },
             format="json",
             **_bff_headers(self.user_id),
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self._assert_success_envelope(response)
         self.assertEqual(response.data["data"]["user_id"], self.user_id)
+        self.assertEqual(response.data["data"]["user_email"], "jane@example.com")
+        self.assertEqual(response.data["data"]["user_name"], "Jane")
+        self.assertEqual(response.data["data"]["user_surname"], "Doe")
+        row = JobApplication.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(row.external_user_email, "jane@example.com")
 
     def test_apply_requires_bff_key(self):
         url = reverse("job_apply", kwargs={"job_id": self.job.id})

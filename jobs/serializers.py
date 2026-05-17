@@ -586,6 +586,9 @@ class JobApplicationSerializer(serializers.ModelSerializer):
     """User-facing application record (includes nested job)."""
 
     user_id = serializers.CharField(source="external_user_id", read_only=True)
+    user_email = serializers.EmailField(source="external_user_email", read_only=True)
+    user_name = serializers.CharField(source="external_user_name", read_only=True)
+    user_surname = serializers.CharField(source="external_user_surname", read_only=True)
     job_id = serializers.IntegerField(source="job.id", read_only=True)
     job = JobApplicationJobSummarySerializer(read_only=True)
     is_withdrawn = serializers.BooleanField(read_only=True)
@@ -595,6 +598,9 @@ class JobApplicationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "user_id",
+            "user_email",
+            "user_name",
+            "user_surname",
             "job_id",
             "job",
             "applied_at",
@@ -608,9 +614,12 @@ class JobApplicationSerializer(serializers.ModelSerializer):
 
 
 class JobApplicantSerializer(serializers.ModelSerializer):
-    """Employer view: applicant with optional breneo user profile."""
+    """Employer view: applicant with stored contact fields + optional breneo profile merge."""
 
     user_id = serializers.CharField(source="external_user_id", read_only=True)
+    user_email = serializers.EmailField(source="external_user_email", read_only=True)
+    user_name = serializers.CharField(source="external_user_name", read_only=True)
+    user_surname = serializers.CharField(source="external_user_surname", read_only=True)
     job_id = serializers.IntegerField(source="job.id", read_only=True)
     user = serializers.SerializerMethodField()
 
@@ -619,6 +628,9 @@ class JobApplicantSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "user_id",
+            "user_email",
+            "user_name",
+            "user_surname",
             "user",
             "job_id",
             "applied_at",
@@ -629,5 +641,15 @@ class JobApplicantSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_user(self, obj):
+        stored = {
+            "id": obj.external_user_id,
+            "email": obj.external_user_email or None,
+            "first_name": obj.external_user_name or None,
+            "last_name": obj.external_user_surname or None,
+            "name": obj.external_user_name or None,
+            "surname": obj.external_user_surname or None,
+        }
         profiles = self.context.get("user_profiles") or {}
-        return profiles.get(obj.external_user_id) or {"id": obj.external_user_id}
+        remote = profiles.get(obj.external_user_id) or {}
+        merged = {**remote, **{k: v for k, v in stored.items() if v}}
+        return merged or {"id": obj.external_user_id}

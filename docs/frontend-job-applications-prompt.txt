@@ -80,7 +80,14 @@ Recruiter applicants (optional BFF):
 --- BFF only (user session required) ---
 
   POST   /api/jobs/{jobId}/apply
-         Body: { "external_user_id": "<userId>" }
+         Body: {
+           "external_user_id": "<userId>",
+           "external_user_email": "<email>",
+           "external_user_name": "<first name>",
+           "external_user_surname": "<last name>"
+         }
+         (email/name/surname also accepted as user_email, first_name, last_name, etc.)
+         If omitted, aggregator may fill from breneo-api when BRENEO_API_BASE_URL is set.
 
   GET    /api/users/me/applications?external_user_id=<userId>&page=1&limit=20&sort=-applied_at
 

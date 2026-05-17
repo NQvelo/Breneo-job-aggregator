@@ -181,6 +181,23 @@ class JobApplication(models.Model):
         db_index=True,
         help_text="User id from breneo-api (string)",
     )
+    external_user_email = models.EmailField(
+        blank=True,
+        default="",
+        help_text="Applicant email from breneo-api / BFF at apply time",
+    )
+    external_user_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Applicant first name at apply time",
+    )
+    external_user_surname = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Applicant last name at apply time",
+    )
     job = models.ForeignKey(
         "Job",
         on_delete=models.CASCADE,

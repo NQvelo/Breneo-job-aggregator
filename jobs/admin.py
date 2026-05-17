@@ -16,9 +16,25 @@ class JobAdminForm(forms.ModelForm):
 
 @admin.register(JobApplication)
 class JobApplicationAdmin(admin.ModelAdmin):
-    list_display = ("external_user_id", "job", "status", "applied_at", "withdrawn_at", "created_at")
+    list_display = (
+        "external_user_id",
+        "external_user_email",
+        "external_user_name",
+        "external_user_surname",
+        "job",
+        "status",
+        "applied_at",
+        "withdrawn_at",
+    )
     list_filter = ("status",)
-    search_fields = ("external_user_id", "job__title", "job__company__name")
+    search_fields = (
+        "external_user_id",
+        "external_user_email",
+        "external_user_name",
+        "external_user_surname",
+        "job__title",
+        "job__company__name",
+    )
     list_select_related = ("job", "job__company")
     autocomplete_fields = ("job",)
     readonly_fields = ("created_at", "updated_at")

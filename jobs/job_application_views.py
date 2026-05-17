@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from .api_response import error_response, success_response
 from .application_exceptions import JobApplicationError
+from .applicant_profile import resolve_applicant_profile
 from .authentication import ApplicationBFFRequiredAuthentication, get_application_user_id
 from .breneo_user import external_user_id_from_request
 from .pagination import ApplicationPagination
@@ -148,9 +149,11 @@ class JobApplyView(JobApplicationBaseView):
         responses={201: _envelope, 400: _envelope, 401: _envelope, 404: _envelope, 409: _envelope},
     )
     def post(self, request, job_id: int):
-        user_id = get_application_user_id(request)
+        profile = resolve_applicant_profile(request)
+        if get_application_user_id(request):
+            profile.user_id = get_application_user_id(request)
         try:
-            application = self.get_service().apply(user_id, job_id)
+            application = self.get_service().apply(profile, job_id)
         except JobApplicationError as exc:
             return error_response(
                 exc.message,

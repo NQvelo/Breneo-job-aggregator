@@ -14,6 +14,7 @@ from ..application_exceptions import (
     JobNotAcceptingApplicationsError,
     JobNotFoundError,
 )
+from ..applicant_profile import ApplicantProfile, enrich_applicant_profile
 from ..job_apply_eligibility import job_supports_in_app_apply
 from ..models import CompanyStaffMembership, JobApplication
 from ..repositories.job_applications import JobApplicationRepository
@@ -26,7 +27,9 @@ class JobApplicationService:
     def __init__(self, repository: JobApplicationRepository | None = None):
         self.repo = repository or JobApplicationRepository()
 
-    def apply(self, user_id: str, job_id: int) -> JobApplication:
+    def apply(self, profile: ApplicantProfile, job_id: int) -> JobApplication:
+        profile = enrich_applicant_profile(profile)
+        user_id = profile.user_id
         job = self.repo.get_job(job_id)
         if not job:
             raise JobNotFoundError("Job not found")
@@ -42,10 +45,10 @@ class JobApplicationService:
         if existing:
             if existing.withdrawn_at is None:
                 raise AlreadyAppliedError("You have already applied to this job.")
-            return self.repo.reactivate(existing)
+            return self.repo.reactivate(existing, profile)
 
         try:
-            application = self.repo.create_application(user_id, job)
+            application = self.repo.create_application(profile, job)
             logger.info("User %s applied to job %s", user_id, job_id)
             return application
         except IntegrityError:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from ..applicant_profile import ApplicantProfile
 from ..models import Job, JobApplication
 
 
@@ -64,20 +65,42 @@ class JobApplicationRepository:
         )
 
     @staticmethod
-    def create_application(user_id: str, job: Job, applied_at=None) -> JobApplication:
+    def create_application(
+        profile: ApplicantProfile,
+        job: Job,
+        applied_at=None,
+    ) -> JobApplication:
+        kwargs = profile.as_create_kwargs()
         return JobApplication.objects.create(
-            external_user_id=user_id,
+            external_user_id=profile.user_id,
+            external_user_email=kwargs["external_user_email"],
+            external_user_name=kwargs["external_user_name"],
+            external_user_surname=kwargs["external_user_surname"],
             job=job,
             applied_at=applied_at or timezone.now(),
             status="applied",
         )
 
     @staticmethod
-    def reactivate(application: JobApplication) -> JobApplication:
+    def reactivate(application: JobApplication, profile: ApplicantProfile) -> JobApplication:
         application.withdrawn_at = None
         application.status = "applied"
         application.applied_at = timezone.now()
-        application.save(update_fields=["withdrawn_at", "status", "applied_at", "updated_at"])
+        kwargs = profile.as_create_kwargs()
+        application.external_user_email = kwargs["external_user_email"] or application.external_user_email
+        application.external_user_name = kwargs["external_user_name"] or application.external_user_name
+        application.external_user_surname = kwargs["external_user_surname"] or application.external_user_surname
+        application.save(
+            update_fields=[
+                "withdrawn_at",
+                "status",
+                "applied_at",
+                "external_user_email",
+                "external_user_name",
+                "external_user_surname",
+                "updated_at",
+            ]
+        )
         return application
 
     @staticmethod
