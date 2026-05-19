@@ -88,7 +88,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"company_id\": {{companyId}},\n  \"external_user_id\": \"{{breneoUserId}}\"\n}",
+          "raw": "{\n  \"company_id\": {{companyId}},\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"external_user_email\": \"user@example.com\",\n  \"external_user_name\": \"Jane\",\n  \"external_user_surname\": \"Doe\",\n  \"is_admin\": false\n}",
           "options": { "raw": { "language": "json" } }
         },
         "url": "{{baseUrl}}/api/employer/staff-memberships"
@@ -117,10 +117,15 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\"\n}",
+          "raw": "{\n  \"is_admin\": true\n}",
           "options": { "raw": { "language": "json" } }
         },
-        "url": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}"
+        "url": {
+          "raw": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}?external_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "employer", "staff-memberships", "{{membershipId}}"],
+          "query": [{ "key": "external_user_id", "value": "{{breneoUserId}}" }]
+        }
       }
     },
     {
@@ -128,7 +133,12 @@
       "request": {
         "method": "DELETE",
         "header": [{ "key": "X-Employer-Key", "value": "{{employerKey}}" }],
-        "url": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}"
+        "url": {
+          "raw": "{{baseUrl}}/api/employer/staff-memberships/{{membershipId}}?external_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "employer", "staff-memberships", "{{membershipId}}"],
+          "query": [{ "key": "external_user_id", "value": "{{breneoUserId}}" }]
+        }
       }
     }
   ]

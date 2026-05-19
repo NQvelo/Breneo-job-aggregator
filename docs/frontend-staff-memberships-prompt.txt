@@ -1,0 +1,357 @@
+FRONTEND UPDATE — COMPANY STAFF MEMBERSHIPS (PROFILE + ADMIN)
+=============================================================
+
+Scope: employer dashboard only. Implement company team / staff members UI and BFF
+routes for staff-memberships. Do NOT change job seeker flows or public job board.
+
+You already call /api/employer/ via BFF with X-Employer-Key. This prompt adds:
+  • stored email, first name, surname per staff member
+  • is_admin flag + admin-only remove / promote rules
+  • auto-admin for the first member of a company
+
+-------------------------------------------------------------------------------
+AUTH & BASE URL (unchanged)
+-------------------------------------------------------------------------------
+
+• Browser → your Next.js /api/app/employer/* routes only
+• BFF → job-aggregator with header: X-Employer-Key: process.env.EMPLOYER_POST_SECRET
+• Base: ${JOB_AGGREGATOR_BASE_URL}/api/employer/
+• Never put X-Employer-Key in client bundles
+
+Identity: Breneo logged-in user id (string) = external_user_id in query/body.
+Alias staff_user_id accepted in query params.
+
+-------------------------------------------------------------------------------
+WHAT CHANGED ON THE BACKEND
+-------------------------------------------------------------------------------
+
+Table company_staff_membership now has:
+
+  external_user_email
+  external_user_name      (first name)
+  external_user_surname   (last name)
+  is_admin                (boolean)
+
+Every staff-memberships API response includes:
+
+  id
+  company_id
+  external_user_id
+  external_user_email
+  external_user_name
+  external_user_surname
+  user_id                 // same as external_user_id
+  user_email              // same as external_user_email
+  user_name               // same as external_user_name
+  user_surname            // same as external_user_surname
+  is_admin
+  created_at
+
+Use either external_user_* or user_* in TypeScript; values are identical.
+
+-------------------------------------------------------------------------------
+ENDPOINTS (staff only)
+-------------------------------------------------------------------------------
+
+GET    /api/employer/staff-memberships
+       ?company_id=<integer>           // filter one company
+       ?external_user_id=<id>          // filter by user (staff_user_id alias)
+
+POST   /api/employer/staff-memberships
+       Body: company_id, external_user_id, optional profile + is_admin
+
+GET    /api/employer/staff-memberships/{membershipId}
+
+PATCH  /api/employer/staff-memberships/{membershipId}
+       ?external_user_id=<acting admin id>   // required to change is_admin
+
+DELETE /api/employer/staff-memberships/{membershipId}
+       ?external_user_id=<acting admin id>   // required for admin-gated remove
+
+Shortcut (same rows):
+
+POST   /api/employer/companies/{company_id}/members
+       Body: external_user_id + optional profile + is_admin
+
+DELETE /api/employer/companies/{company_id}/members?external_user_id=<target>
+       &external_user_id=<acting admin>  // use query for BOTH:
+         • member to remove = body or first param (see below)
+         • acting admin = MUST be the logged-in user for permission check
+
+For DELETE members shortcut:
+  • Target user to remove: ?external_user_id= on query OR body external_user_id
+  • Acting admin: append ?external_user_id=<loggedInUserId> on the BFF→aggregator call
+    (same query key — aggregator reads requester from query; target from body/query)
+
+Prefer staff-memberships DELETE with membership id for clarity:
+
+  DELETE /api/employer/staff-memberships/{id}?external_user_id={loggedInUserId}
+
+Company JSON still has read-only staff_user_ids: string[] — list UI should use
+GET staff-memberships?company_id= for full rows (name, email, is_admin).
+
+-------------------------------------------------------------------------------
+ADMIN RULES (implement in UI + BFF)
+-------------------------------------------------------------------------------
+
+ON CREATE
+  • First staff row for a company → backend forces is_admin: true (ignore false).
+  • Later members → is_admin defaults false unless you send true AND an admin creates them.
+  • On onboarding (user joins empty company), show Admin checked and disabled.
+
+ON DELETE (when BFF sends ?external_user_id= logged-in user)
+  • Only is_admin members can remove OTHERS.
+  • Cannot remove yourself → show error, ask to transfer admin first.
+  • Cannot remove the only admin.
+  • 403 body: { "error": "<message>" }
+
+ON PATCH is_admin (when BFF sends ?external_user_id= logged-in admin)
+  • Only admins can toggle another member's is_admin.
+  • Cannot demote the last admin.
+  • 400 validation error if not allowed.
+
+If DELETE/PATCH omit ?external_user_id=, server trusts X-Employer-Key only (BFF).
+For user-facing team management, ALWAYS send ?external_user_id=<session user id>.
+
+-------------------------------------------------------------------------------
+FIX 1 — TYPESCRIPT TYPES
+-------------------------------------------------------------------------------
+
+  interface CompanyStaffMembership {
+    id: number;
+    company_id: number;
+    external_user_id: string;
+    external_user_email: string;
+    external_user_name: string;
+    external_user_surname: string;
+    user_id: string;
+    user_email: string;
+    user_name: string;
+    user_surname: string;
+    is_admin: boolean;
+    created_at: string;
+  }
+
+  function staffDisplayName(m: CompanyStaffMembership): string {
+    const name = m.external_user_name || m.user_name || "";
+    const surname = m.external_user_surname || m.user_surname || "";
+    return [name, surname].filter(Boolean).join(" ") || m.external_user_id;
+  }
+
+  function staffEmail(m: CompanyStaffMembership): string {
+    return m.external_user_email || m.user_email || "";
+  }
+
+  function isCurrentUserAdmin(
+    memberships: CompanyStaffMembership[],
+    userId: string
+  ): boolean {
+    return memberships.some(
+      (m) => m.external_user_id === userId && m.is_admin
+    );
+  }
+
+-------------------------------------------------------------------------------
+FIX 2 — BFF: LIST TEAM
+-------------------------------------------------------------------------------
+
+--- app/api/app/employer/companies/[companyId]/staff/route.ts ---
+
+  export async function GET(
+    _req: Request,
+    { params }: { params: { companyId: string } }
+  ) {
+    const user = await getSessionUser();
+    if (!user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const res = await fetch(
+      `${process.env.JOB_AGGREGATOR_BASE_URL}/api/employer/staff-memberships?company_id=${params.companyId}`,
+      { headers: { "X-Employer-Key": process.env.EMPLOYER_POST_SECRET! } }
+    );
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  }
+
+Response is a JSON array of CompanyStaffMembership (not wrapped in success envelope).
+
+-------------------------------------------------------------------------------
+FIX 3 — BFF: ADD MEMBER (onboarding + invite)
+-------------------------------------------------------------------------------
+
+When the logged-in user joins a company OR you add another user, send profile fields
+from session (same mapping as job applications).
+
+--- POST staff-memberships ---
+
+  const user = await getSessionUser();
+
+  const res = await fetch(
+    `${process.env.JOB_AGGREGATOR_BASE_URL}/api/employer/staff-memberships`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Employer-Key": process.env.EMPLOYER_POST_SECRET!,
+      },
+      body: JSON.stringify({
+        company_id: Number(companyId),
+        external_user_id: String(user.id),
+        external_user_email: user.email ?? "",
+        external_user_name: user.firstName ?? user.name ?? "",
+        external_user_surname: user.lastName ?? user.surname ?? "",
+        is_admin: false, // backend overrides to true if first member
+      }),
+    }
+  );
+
+| Breneo session field | Send to aggregator     |
+|----------------------|------------------------|
+| user.id              | external_user_id       |
+| user.email           | external_user_email    |
+| user.firstName       | external_user_name     |
+| user.lastName        | external_user_surname  |
+
+CamelCase aliases accepted: email, firstName, lastName
+
+After POST, read response.is_admin — if true, user is company admin (first member).
+
+Shortcut equivalent:
+
+  POST /api/employer/companies/{company_id}/members
+  same JSON body (external_user_id + profile fields)
+
+-------------------------------------------------------------------------------
+FIX 4 — BFF: REMOVE MEMBER (admin only)
+-------------------------------------------------------------------------------
+
+  export async function DELETE(
+    req: Request,
+    { params }: { params: { companyId: string; membershipId: string } }
+  ) {
+    const user = await getSessionUser();
+    if (!user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const url = new URL(
+      `${process.env.JOB_AGGREGATOR_BASE_URL}/api/employer/staff-memberships/${params.membershipId}`
+    );
+    url.searchParams.set("external_user_id", String(user.id));
+
+    const res = await fetch(url.toString(), {
+      method: "DELETE",
+      headers: { "X-Employer-Key": process.env.EMPLOYER_POST_SECRET! },
+    });
+
+    if (res.status === 403) {
+      const body = await res.json();
+      return NextResponse.json(
+        { error: body.error ?? "Not allowed" },
+        { status: 403 }
+      );
+    }
+    if (res.status === 204) return new NextResponse(null, { status: 204 });
+    return NextResponse.json(await res.json(), { status: res.status });
+  }
+
+Map 403 messages for toast:
+  • "Only company admins can remove staff members."
+  • "Admins cannot remove themselves. Transfer admin to another member first."
+  • "Cannot remove the only admin for this company."
+
+-------------------------------------------------------------------------------
+FIX 5 — BFF: TOGGLE ADMIN (admin only)
+-------------------------------------------------------------------------------
+
+  const url = new URL(
+    `${process.env.JOB_AGGREGATOR_BASE_URL}/api/employer/staff-memberships/${membershipId}`
+  );
+  url.searchParams.set("external_user_id", String(sessionUser.id));
+
+  await fetch(url.toString(), {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Employer-Key": process.env.EMPLOYER_POST_SECRET!,
+    },
+    body: JSON.stringify({ is_admin: true }),
+  });
+
+Only show the Admin checkbox / toggle if current user is admin (see isCurrentUserAdmin).
+Do not allow toggling your own admin off if you are the only admin (disable + tooltip).
+
+-------------------------------------------------------------------------------
+FIX 6 — UI: TEAM / MEMBERS PAGE
+-------------------------------------------------------------------------------
+
+Route example: /employer/company/[companyId]/team
+
+Load: GET staff-memberships?company_id={companyId}
+
+Table columns:
+
+  | Name | Email | Admin | Actions |
+  |------|-------|-------|---------|
+  | staffDisplayName(m) | staffEmail(m) | checkbox or badge | Remove |
+
+Rules:
+  • Show "Admin" badge or checked box when m.is_admin
+  • Remove button: visible only if currentUserIsAdmin && m.external_user_id !== currentUserId
+  • Admin toggle on row: only if currentUserIsAdmin && row is not self OR multiple admins exist
+  • Empty state: "No team members yet" — CTA joins via onboarding POST
+
+Onboarding flow (user picks/creates company):
+  1) POST staff-memberships with session profile (Fix 3)
+  2) If response.is_admin === true → show "You are the company admin"
+  3) Redirect to company dashboard
+
+First-member UX:
+  • Admin checkbox ON and disabled (backend always sets is_admin true)
+  • Copy: "As the first member, you are the company admin."
+
+-------------------------------------------------------------------------------
+EXAMPLE RESPONSE — POST create & GET list
+-------------------------------------------------------------------------------
+
+POST /api/employer/staff-memberships → 201
+
+{
+  "id": 12,
+  "company_id": 5,
+  "external_user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "external_user_email": "jane@example.com",
+  "external_user_name": "Jane",
+  "external_user_surname": "Doe",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user_email": "jane@example.com",
+  "user_name": "Jane",
+  "user_surname": "Doe",
+  "is_admin": true,
+  "created_at": "2026-05-19T10:00:00Z"
+}
+
+GET /api/employer/staff-memberships?company_id=5 → 200 array of objects above.
+
+-------------------------------------------------------------------------------
+QUICK DEBUG CHECKLIST
+-------------------------------------------------------------------------------
+
+[ ] BFF POST includes external_user_email, external_user_name, external_user_surname
+[ ] First user for company gets is_admin: true in response
+[ ] Team list shows name + email from API (not only external_user_id)
+[ ] DELETE sends ?external_user_id=<logged-in id>; non-admin gets 403
+[ ] Admin cannot delete self; UI hides Remove on own row
+[ ] PATCH is_admin sends ?external_user_id=<logged-in admin id>
+[ ] Old memberships may have "" for email/name until re-saved (expected)
+
+-------------------------------------------------------------------------------
+OUT OF SCOPE (do not implement in this task)
+-------------------------------------------------------------------------------
+
+• Job applications (see docs/frontend-job-applications-prompt.txt)
+• Public /api/companies/{company_name} job board routes
+• Posting jobs, company logo edit (see docs/frontend-company-profile-edit-prompt.txt)
+
+Postman reference:
+  postman/breneo-employer-api.postman_collection.json
+  → "Employer — create/list/patch/delete staff membership"
+
+End of prompt.

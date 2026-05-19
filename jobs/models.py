@@ -158,6 +158,27 @@ class CompanyStaffMembership(models.Model):
         db_index=True,
         help_text="User id from breneo-api (string)",
     )
+    external_user_email = models.EmailField(
+        blank=True,
+        default="",
+        help_text="Staff email from breneo-api / BFF at membership time",
+    )
+    external_user_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Staff first name at membership time",
+    )
+    external_user_surname = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Staff last name at membership time",
+    )
+    is_admin = models.BooleanField(
+        default=False,
+        help_text="Company admin: can remove other staff for this company",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

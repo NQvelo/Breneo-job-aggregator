@@ -42,9 +42,24 @@ class JobApplicationAdmin(admin.ModelAdmin):
 
 @admin.register(CompanyStaffMembership)
 class CompanyStaffMembershipAdmin(admin.ModelAdmin):
-    list_display = ("company", "external_user_id", "created_at")
+    list_display = (
+        "company",
+        "external_user_id",
+        "external_user_email",
+        "external_user_name",
+        "external_user_surname",
+        "is_admin",
+        "created_at",
+    )
+    list_filter = ("is_admin",)
     list_select_related = ("company",)
-    search_fields = ("external_user_id", "company__name")
+    search_fields = (
+        "external_user_id",
+        "external_user_email",
+        "external_user_name",
+        "external_user_surname",
+        "company__name",
+    )
     autocomplete_fields = ("company",)
 
 

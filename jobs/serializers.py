@@ -124,10 +124,27 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
         source="company",
         queryset=Company.objects.all(),
     )
+    user_id = serializers.CharField(source="external_user_id", read_only=True)
+    user_email = serializers.CharField(source="external_user_email", read_only=True)
+    user_name = serializers.CharField(source="external_user_name", read_only=True)
+    user_surname = serializers.CharField(source="external_user_surname", read_only=True)
 
     class Meta:
         model = CompanyStaffMembership
-        fields = ["id", "company_id", "external_user_id", "created_at"]
+        fields = [
+            "id",
+            "company_id",
+            "external_user_id",
+            "external_user_email",
+            "external_user_name",
+            "external_user_surname",
+            "user_id",
+            "user_email",
+            "user_name",
+            "user_surname",
+            "is_admin",
+            "created_at",
+        ]
         read_only_fields = ["id", "created_at"]
 
     def validate_external_user_id(self, value: str) -> str:
@@ -135,6 +152,31 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
         if not v:
             raise serializers.ValidationError("This field may not be blank.")
         return v
+
+    def validate_is_admin(self, value: bool) -> bool:
+        instance = self.instance
+        if instance is None:
+            return value
+
+        request = self.context.get("request")
+        from .breneo_user import external_user_id_from_request
+
+        requester_id = external_user_id_from_request(request) if request else ""
+        new_value = value
+        if new_value == instance.is_admin:
+            return value
+
+        from .services.staff_memberships import check_can_change_admin_flag
+
+        err = check_can_change_admin_flag(
+            company=instance.company,
+            requester_user_id=requester_id,
+            instance=instance,
+            new_is_admin=new_value,
+        )
+        if err:
+            raise serializers.ValidationError(err)
+        return value
 
     def validate(self, attrs):
         company = attrs.get("company", getattr(self.instance, "company", None))
@@ -148,6 +190,37 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
                     {"non_field_errors": ["This company already has this external_user_id."]}
                 )
         return attrs
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        company = validated_data["company"]
+        external_user_id = validated_data["external_user_id"]
+        requested_admin = validated_data.pop("is_admin", False)
+
+        from .services.staff_memberships import (
+            resolve_is_admin_on_create,
+            staff_profile_create_kwargs,
+        )
+
+        profile_kwargs = staff_profile_create_kwargs(request, external_user_id) if request else {}
+        validated_data.update(profile_kwargs)
+        validated_data["is_admin"] = resolve_is_admin_on_create(company, requested_admin)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        request = self.context.get("request")
+        external_user_id = validated_data.get("external_user_id", instance.external_user_id)
+
+        if request:
+            from .services.staff_memberships import (
+                merge_staff_profile_kwargs,
+                staff_profile_create_kwargs,
+            )
+
+            incoming = staff_profile_create_kwargs(request, external_user_id)
+            validated_data.update(merge_staff_profile_kwargs(instance, incoming))
+
+        return super().update(instance, validated_data)
 
 
 class CompanyInfoSerializer(DynamicFieldsModelSerializer):

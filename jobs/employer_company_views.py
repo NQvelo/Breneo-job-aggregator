@@ -14,6 +14,11 @@ from .serializers import (
     EmployerCompanyWriteSerializer,
     IndustrySerializer,
 )
+from .services.staff_memberships import (
+    delete_staff_membership,
+    resolve_is_admin_on_create,
+    staff_profile_create_kwargs,
+)
 
 
 def _employer_company_write_data(request):
@@ -115,7 +120,10 @@ class EmployerStaffMembershipListCreateView(APIView):
         return Response(CompanyStaffMembershipSerializer(qs, many=True).data)
 
     def post(self, request):
-        ser = CompanyStaffMembershipSerializer(data=request.data)
+        ser = CompanyStaffMembershipSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         ser.is_valid(raise_exception=True)
         row = ser.save()
         row = CompanyStaffMembership.objects.select_related("company").get(pk=row.pk)
@@ -148,7 +156,12 @@ class EmployerStaffMembershipDetailView(APIView):
             row = CompanyStaffMembership.objects.get(pk=membership_id)
         except CompanyStaffMembership.DoesNotExist:
             return Response({"error": "Membership not found"}, status=status.HTTP_404_NOT_FOUND)
-        ser = CompanyStaffMembershipSerializer(row, data=request.data, partial=True)
+        ser = CompanyStaffMembershipSerializer(
+            row,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
         ser.is_valid(raise_exception=True)
         ser.save()
         row = CompanyStaffMembership.objects.select_related("company").get(pk=row.pk)
@@ -159,16 +172,28 @@ class EmployerStaffMembershipDetailView(APIView):
             row = CompanyStaffMembership.objects.get(pk=membership_id)
         except CompanyStaffMembership.DoesNotExist:
             return Response({"error": "Membership not found"}, status=status.HTTP_404_NOT_FOUND)
-        ser = CompanyStaffMembershipSerializer(row, data=request.data, partial=False)
+        ser = CompanyStaffMembershipSerializer(
+            row,
+            data=request.data,
+            partial=False,
+            context={"request": request},
+        )
         ser.is_valid(raise_exception=True)
         ser.save()
         row = CompanyStaffMembership.objects.select_related("company").get(pk=row.pk)
         return Response(CompanyStaffMembershipSerializer(row).data)
 
     def delete(self, request, membership_id: int):
-        deleted, _ = CompanyStaffMembership.objects.filter(pk=membership_id).delete()
-        if not deleted:
+        try:
+            row = CompanyStaffMembership.objects.select_related("company").get(pk=membership_id)
+        except CompanyStaffMembership.DoesNotExist:
             return Response({"error": "Membership not found"}, status=status.HTTP_404_NOT_FOUND)
+        ok, err = delete_staff_membership(
+            row,
+            requester_user_id=_external_user_id_from_request(request),
+        )
+        if not ok:
+            return Response({"error": err}, status=status.HTTP_403_FORBIDDEN)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -236,9 +261,24 @@ class EmployerCompanyMemberView(APIView):
         if err:
             return err
 
-        _, created = CompanyStaffMembership.objects.get_or_create(
-            company=company, external_user_id=uid
+        profile_kwargs = staff_profile_create_kwargs(request, uid)
+        is_admin = resolve_is_admin_on_create(
+            company,
+            bool(request.data.get("is_admin")),
         )
+        row, created = CompanyStaffMembership.objects.get_or_create(
+            company=company,
+            external_user_id=uid,
+            defaults={**profile_kwargs, "is_admin": is_admin},
+        )
+        if not created and profile_kwargs:
+            update_fields = []
+            for field, value in profile_kwargs.items():
+                if value and getattr(row, field) != value:
+                    setattr(row, field, value)
+                    update_fields.append(field)
+            if update_fields:
+                row.save(update_fields=update_fields)
         out = CompanyDetailSerializer(
             Company.objects.prefetch_related("industries", "staff_memberships").get(
                 pk=company.pk
@@ -256,11 +296,17 @@ class EmployerCompanyMemberView(APIView):
         if err:
             return err
 
-        deleted, _ = CompanyStaffMembership.objects.filter(
-            company=company, external_user_id=uid
-        ).delete()
-        if not deleted:
+        try:
+            row = CompanyStaffMembership.objects.get(company=company, external_user_id=uid)
+        except CompanyStaffMembership.DoesNotExist:
             return Response({"error": "Membership not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        ok, err = delete_staff_membership(
+            row,
+            requester_user_id=_external_user_id_from_request(request),
+        )
+        if not ok:
+            return Response({"error": err}, status=status.HTTP_403_FORBIDDEN)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

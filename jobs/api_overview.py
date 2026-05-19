@@ -158,17 +158,20 @@ API_GROUPS = [
             {
                 "methods": ["POST", "DELETE"],
                 "path": "/api/employer/companies/{company_id}/members",
-                "description": "Add/remove staff by external_user_id (body or query).",
+                "description": "Add/remove staff. Body/query: external_user_id; optional profile fields and is_admin. "
+                "DELETE with ?external_user_id= requires company admin.",
             },
             {
                 "methods": ["GET", "POST"],
                 "path": "/api/employer/staff-memberships",
-                "description": "List (?company_id=, ?external_user_id=); POST create membership.",
+                "description": "List (?company_id=, ?external_user_id=). POST: company_id, external_user_id, "
+                "optional external_user_email/name/surname (or aliases), is_admin. First member is auto-admin.",
             },
             {
                 "methods": ["GET", "PUT", "PATCH", "DELETE"],
                 "path": "/api/employer/staff-memberships/{membership_id}",
-                "description": "Retrieve, update, or delete a membership row.",
+                "description": "CRUD membership row. DELETE with ?external_user_id= requires company admin "
+                "(cannot remove self or last admin).",
             },
             {
                 "methods": ["POST"],
