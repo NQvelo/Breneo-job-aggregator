@@ -88,7 +88,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"company_id\": {{companyId}},\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"external_user_email\": \"user@example.com\",\n  \"external_user_name\": \"Jane\",\n  \"external_user_surname\": \"Doe\",\n  \"is_admin\": false\n}",
+          "raw": "{\n  \"company_id\": {{companyId}},\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"external_user_email\": \"user@example.com\",\n  \"external_user_name\": \"Jane\",\n  \"external_user_surname\": \"Doe\",\n  \"status\": \"member\"\n}",
           "options": { "raw": { "language": "json" } }
         },
         "url": "{{baseUrl}}/api/employer/staff-memberships"
@@ -117,7 +117,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"is_admin\": true\n}",
+          "raw": "{\n  \"status\": \"admin\"\n}",
           "options": { "raw": { "language": "json" } }
         },
         "url": {

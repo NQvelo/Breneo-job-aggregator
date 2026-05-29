@@ -16,7 +16,7 @@ from .serializers import (
 )
 from .services.staff_memberships import (
     delete_staff_membership,
-    resolve_is_admin_on_create,
+    resolve_status_on_create,
     staff_profile_create_kwargs,
 )
 
@@ -72,7 +72,11 @@ def _staff_scoped_access(request, company: Company) -> bool:
     sid = _external_user_id_from_request(request)
     if not sid:
         return True
-    return CompanyStaffMembership.objects.filter(company=company, external_user_id=sid).exists()
+    return CompanyStaffMembership.objects.filter(
+        company=company,
+        external_user_id=sid,
+        status__in=CompanyStaffMembership.access_statuses(),
+    ).exists()
 
 
 def _company_queryset_base():
@@ -262,14 +266,14 @@ class EmployerCompanyMemberView(APIView):
             return err
 
         profile_kwargs = staff_profile_create_kwargs(request, uid)
-        is_admin = resolve_is_admin_on_create(
+        member_status = resolve_status_on_create(
             company,
-            bool(request.data.get("is_admin")),
+            request.data.get("status"),
         )
         row, created = CompanyStaffMembership.objects.get_or_create(
             company=company,
             external_user_id=uid,
-            defaults={**profile_kwargs, "is_admin": is_admin},
+            defaults={**profile_kwargs, "status": member_status},
         )
         if not created and profile_kwargs:
             update_fields = []

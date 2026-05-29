@@ -24,7 +24,7 @@ COMPANIES
 STAFF MEMBERSHIPS (Breneo user ↔ company)
 - Company JSON includes read-only staff_user_ids: string[] (computed). Source of truth: staff-memberships.
 - GET staff-memberships — optional ?company_id= (integer id), ?external_user_id= (or staff_user_id).
-- POST staff-memberships — body { "company_id": number, "external_user_id": string }.
+- POST staff-memberships — body { company_id, external_user_id, optional profile, status: pending|member|admin }.
 - GET|PATCH|PUT|DELETE staff-memberships/<membershipId>
 - Shortcut: POST companies/<company_id>/members body { "external_user_id": "..." }; DELETE companies/<company_id>/members?external_user_id=...
 

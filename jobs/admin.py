@@ -48,10 +48,10 @@ class CompanyStaffMembershipAdmin(admin.ModelAdmin):
         "external_user_email",
         "external_user_name",
         "external_user_surname",
-        "is_admin",
+        "status",
         "created_at",
     )
-    list_filter = ("is_admin",)
+    list_filter = ("status",)
     list_select_related = ("company",)
     search_fields = (
         "external_user_id",

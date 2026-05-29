@@ -142,7 +142,7 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
             "user_email",
             "user_name",
             "user_surname",
-            "is_admin",
+            "status",
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
@@ -153,30 +153,31 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This field may not be blank.")
         return v
 
-    def validate_is_admin(self, value: bool) -> bool:
+    def validate_status(self, value: str) -> str:
+        from .services.staff_memberships import normalize_status
+
+        normalized = normalize_status(value)
         instance = self.instance
         if instance is None:
-            return value
+            return normalized
+
+        if normalized == instance.status:
+            return normalized
 
         request = self.context.get("request")
         from .breneo_user import external_user_id_from_request
+        from .services.staff_memberships import check_can_change_status
 
         requester_id = external_user_id_from_request(request) if request else ""
-        new_value = value
-        if new_value == instance.is_admin:
-            return value
-
-        from .services.staff_memberships import check_can_change_admin_flag
-
-        err = check_can_change_admin_flag(
+        err = check_can_change_status(
             company=instance.company,
             requester_user_id=requester_id,
             instance=instance,
-            new_is_admin=new_value,
+            new_status=normalized,
         )
         if err:
             raise serializers.ValidationError(err)
-        return value
+        return normalized
 
     def validate(self, attrs):
         company = attrs.get("company", getattr(self.instance, "company", None))
@@ -195,16 +196,16 @@ class CompanyStaffMembershipSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         company = validated_data["company"]
         external_user_id = validated_data["external_user_id"]
-        requested_admin = validated_data.pop("is_admin", False)
+        requested_status = validated_data.pop("status", None)
 
         from .services.staff_memberships import (
-            resolve_is_admin_on_create,
+            resolve_status_on_create,
             staff_profile_create_kwargs,
         )
 
         profile_kwargs = staff_profile_create_kwargs(request, external_user_id) if request else {}
         validated_data.update(profile_kwargs)
-        validated_data["is_admin"] = resolve_is_admin_on_create(company, requested_admin)
+        validated_data["status"] = resolve_status_on_create(company, requested_status)
         return super().create(validated_data)
 
     def update(self, instance, validated_data):

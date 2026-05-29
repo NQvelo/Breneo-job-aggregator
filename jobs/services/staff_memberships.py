@@ -1,4 +1,4 @@
-"""Company staff membership helpers (profile snapshot, admin rules, safe removal)."""
+"""Company staff membership helpers (profile snapshot, status rules, safe removal)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,16 @@ from django.db import transaction
 
 from ..applicant_profile import ApplicantProfile, applicant_profile_from_request, enrich_applicant_profile
 from ..models import Company, CompanyStaffMembership
+
+StaffStatus = CompanyStaffMembership.StaffStatus
+VALID_STATUSES = {StaffStatus.PENDING, StaffStatus.MEMBER, StaffStatus.ADMIN}
+
+
+def normalize_status(value: str | None, *, default: str = StaffStatus.MEMBER) -> str:
+    raw = (value or "").strip().lower()
+    if raw in VALID_STATUSES:
+        return raw
+    return default
 
 
 def resolve_staff_profile(request, external_user_id: str) -> ApplicantProfile:
@@ -48,14 +58,14 @@ def is_first_staff_for_company(company: Company) -> bool:
     return not CompanyStaffMembership.objects.filter(company=company).exists()
 
 
-def resolve_is_admin_on_create(
+def resolve_status_on_create(
     company: Company,
-    requested: bool | None,
-) -> bool:
+    requested_status: str | None,
+) -> str:
     """First member for a company is always admin."""
     if is_first_staff_for_company(company):
-        return True
-    return bool(requested)
+        return StaffStatus.ADMIN
+    return normalize_status(requested_status, default=StaffStatus.MEMBER)
 
 
 def requester_membership(
@@ -71,29 +81,37 @@ def requester_membership(
 
 
 def admin_count_for_company(company: Company) -> int:
-    return CompanyStaffMembership.objects.filter(company=company, is_admin=True).count()
+    return CompanyStaffMembership.objects.filter(
+        company=company,
+        status=StaffStatus.ADMIN,
+    ).count()
 
 
-def check_can_change_admin_flag(
+def check_can_change_status(
     *,
     company: Company,
     requester_user_id: str,
     instance: CompanyStaffMembership,
-    new_is_admin: bool,
+    new_status: str,
 ) -> str | None:
     """
-    When external_user_id is provided on the request, only admins may change is_admin.
+    When external_user_id is provided on the request, only admins may change status.
     Cannot demote the last admin.
     """
     if not requester_user_id:
         return None
 
-    requester = requester_membership(company, requester_user_id)
-    if requester is None or not requester.is_admin:
-        return "Only company admins can change admin status."
+    new_status = normalize_status(new_status)
+    if new_status == instance.status:
+        return None
 
-    if instance.is_admin and not new_is_admin and admin_count_for_company(company) <= 1:
-        return "Cannot remove admin from the only admin for this company."
+    requester = requester_membership(company, requester_user_id)
+    if requester is None or requester.status != StaffStatus.ADMIN:
+        return "Only company admins can change member status."
+
+    if instance.status == StaffStatus.ADMIN and new_status != StaffStatus.ADMIN:
+        if admin_count_for_company(company) <= 1:
+            return "Cannot change status of the only admin for this company."
 
     return None
 
@@ -105,20 +123,20 @@ def check_can_remove_staff_member(
     target: CompanyStaffMembership,
 ) -> str | None:
     """
-  When external_user_id is provided, only a company admin may remove another member
-  of the same company. Cannot remove yourself or the last admin.
+    When external_user_id is provided, only a company admin may remove another member
+    of the same company. Cannot remove yourself or the last admin.
     """
     if not requester_user_id:
         return None
 
     requester = requester_membership(company, requester_user_id)
-    if requester is None or not requester.is_admin:
+    if requester is None or requester.status != StaffStatus.ADMIN:
         return "Only company admins can remove staff members."
 
     if target.pk == requester.pk:
         return "Admins cannot remove themselves. Transfer admin to another member first."
 
-    if target.is_admin and admin_count_for_company(company) <= 1:
+    if target.status == StaffStatus.ADMIN and admin_count_for_company(company) <= 1:
         return "Cannot remove the only admin for this company."
 
     return None

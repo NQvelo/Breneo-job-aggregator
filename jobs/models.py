@@ -148,6 +148,11 @@ class Company(models.Model):
 class CompanyStaffMembership(models.Model):
     """Links a breneo-api user id (`external_user_id`) to a company for employer access."""
 
+    class StaffStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        MEMBER = "member", "Member"
+        ADMIN = "admin", "Admin"
+
     company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
@@ -175,11 +180,23 @@ class CompanyStaffMembership(models.Model):
         default="",
         help_text="Staff last name at membership time",
     )
-    is_admin = models.BooleanField(
-        default=False,
-        help_text="Company admin: can remove other staff for this company",
+    status = models.CharField(
+        max_length=20,
+        choices=StaffStatus.choices,
+        default=StaffStatus.MEMBER,
+        db_index=True,
+        help_text="pending = awaiting approval; member = staff; admin = can manage team",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_company_admin(self) -> bool:
+        return self.status == self.StaffStatus.ADMIN
+
+    @classmethod
+    def access_statuses(cls) -> tuple[str, ...]:
+        """Statuses that grant employer company access (not pending)."""
+        return (cls.StaffStatus.MEMBER, cls.StaffStatus.ADMIN)
 
     class Meta:
         constraints = [

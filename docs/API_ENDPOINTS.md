@@ -65,9 +65,9 @@ Company **detail / members** routes use the numeric **`company_id`** (primary ke
 | GET, POST | `/api/employer/companies` | GET: list (`?search=`, `?external_user_id=` / `staff_user_id`). POST: create company. |
 | GET | `/api/employer/companies/for-user` | Companies for a user (`?external_user_id=` required). |
 | GET, PUT, PATCH | `/api/employer/companies/{company_id}` | Company detail / full or partial update. Optional `?external_user_id=` for scoped access. |
-| POST, DELETE | `/api/employer/companies/{company_id}/members` | Add/remove staff. Profile fields + `is_admin` on POST. DELETE with `?external_user_id=` requires company admin. |
-| GET, POST | `/api/employer/staff-memberships` | List (`?company_id=`, `?external_user_id=`). POST: `company_id`, `external_user_id`, optional `external_user_email` / `name` / `surname`, `is_admin` (first member is auto-admin). |
-| GET, PUT, PATCH, DELETE | `/api/employer/staff-memberships/{id}` | Membership CRUD. DELETE with `?external_user_id=` requires company admin (cannot remove self or last admin). |
+| POST, DELETE | `/api/employer/companies/{company_id}/members` | Add/remove staff. Profile fields + `status` (`pending` \| `member` \| `admin`) on POST. DELETE requires admin. |
+| GET, POST | `/api/employer/staff-memberships` | List (`?company_id=`, `?external_user_id=`). POST: profile fields + `status` (first member auto `admin`). |
+| GET, PUT, PATCH, DELETE | `/api/employer/staff-memberships/{id}` | Membership CRUD. `status`: pending, member, admin. DELETE requires admin. |
 | GET, POST | `/api/employer/jobs` | GET: list (`?company_id=` or `?company=`). POST: create job. |
 | GET, PATCH, POST, DELETE | `/api/employer/jobs/{job_id}` | Job CRUD; POST mirrors PATCH; optional `?company_id=` to scope. |
 

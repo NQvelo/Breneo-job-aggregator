@@ -79,6 +79,7 @@ class JobApplicationService:
         if requester_user_id and not CompanyStaffMembership.objects.filter(
             company=job.company,
             external_user_id=requester_user_id,
+            status__in=CompanyStaffMembership.access_statuses(),
         ).exists():
             raise ForbiddenJobAccessError("Not authorized for this company's jobs.")
 

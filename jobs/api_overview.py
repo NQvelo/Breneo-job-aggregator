@@ -158,14 +158,14 @@ API_GROUPS = [
             {
                 "methods": ["POST", "DELETE"],
                 "path": "/api/employer/companies/{company_id}/members",
-                "description": "Add/remove staff. Body/query: external_user_id; optional profile fields and is_admin. "
-                "DELETE with ?external_user_id= requires company admin.",
+                "description": "Add/remove staff. Body/query: external_user_id; optional profile fields and status "
+                "(pending|member|admin). DELETE with ?external_user_id= requires admin status.",
             },
             {
                 "methods": ["GET", "POST"],
                 "path": "/api/employer/staff-memberships",
                 "description": "List (?company_id=, ?external_user_id=). POST: company_id, external_user_id, "
-                "optional external_user_email/name/surname (or aliases), is_admin. First member is auto-admin.",
+                "optional profile fields, status (pending|member|admin). First member is auto admin.",
             },
             {
                 "methods": ["GET", "PUT", "PATCH", "DELETE"],
