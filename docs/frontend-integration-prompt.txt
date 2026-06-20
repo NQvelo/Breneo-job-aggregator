@@ -13,6 +13,7 @@ IDENTITY
 - Use the Breneo logged-in user id as external_user_id (string) in queries and bodies. Alias staff_user_id is accepted in query params and some bodies where noted.
 
 COMPANIES
+
 - Company detail and members routes use numeric `company_id` in the path (primary key from list/detail JSON).
 - GET companies — list (company picker). Optional ?search= substring match on name. Optional ?external_user_id= or ?staff_user_id= to filter to companies where that user is staff.
 - GET companies/for-user?external_user_id=<id> — “my companies” (param required; staff_user_id alias).
