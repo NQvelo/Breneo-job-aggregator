@@ -25,6 +25,13 @@ from .job_application_views import (
     JobWithdrawApplicationView,
     UserApplicationsView,
     JobApplicantsView,
+    JobApplicantCvViewRecordView,
+)
+from .applicant_cv_view_views import (
+    EmployerJobCvViewListCreateView,
+    EmployerJobCvViewDetailView,
+    UserCvViewListView,
+    UserCvViewDetailView,
 )
 
 urlpatterns = [
@@ -58,9 +65,26 @@ urlpatterns = [
         name='employer_company_detail',
     ),
     path('users/me/applications', UserApplicationsView.as_view(), name='user_applications'),
+    path('users/me/cv-views', UserCvViewListView.as_view(), name='user_cv_views'),
+    path('users/me/cv-views/<int:cv_view_id>', UserCvViewDetailView.as_view(), name='user_cv_view_detail'),
     path('jobs/<int:job_id>/apply', JobApplyView.as_view(), name='job_apply'),
     path('jobs/<int:job_id>/application', JobWithdrawApplicationView.as_view(), name='job_withdraw_application'),
     path('jobs/<int:job_id>/applicants', JobApplicantsView.as_view(), name='job_applicants'),
+    path(
+        'jobs/<int:job_id>/applicants/<str:applicant_user_id>/cv-view',
+        JobApplicantCvViewRecordView.as_view(),
+        name='job_applicant_cv_view',
+    ),
+    path(
+        'jobs/<int:job_id>/applicant-cv-views',
+        EmployerJobCvViewListCreateView.as_view(),
+        name='employer_job_cv_views',
+    ),
+    path(
+        'jobs/<int:job_id>/applicant-cv-views/<int:cv_view_id>',
+        EmployerJobCvViewDetailView.as_view(),
+        name='employer_job_cv_view_detail',
+    ),
     path('jobs/parse-description', ParseJobDescriptionView.as_view(), name='parse_job_description'),
     path('employer/jobs', EmployerJobCreateView.as_view(), name='employer_job_create'),
     path('employer/jobs/<int:job_id>', EmployerJobDetailView.as_view(), name='employer_job_detail'),

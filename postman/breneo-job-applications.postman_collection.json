@@ -8,7 +8,9 @@
     { "key": "baseUrl", "value": "https://breneo-job-aggregator.up.railway.app" },
     { "key": "applicationKey", "value": "PASTE_APPLICATION_API_SECRET_OR_EMPLOYER_POST_SECRET" },
     { "key": "breneoUserId", "value": "your-breneo-user-id" },
-    { "key": "jobId", "value": "1" }
+    { "key": "employerUserId", "value": "your-employer-staff-user-id" },
+    { "key": "jobId", "value": "1" },
+    { "key": "cvViewId", "value": "1" }
   ],
   "item": [
     {
@@ -80,6 +82,82 @@
             { "key": "limit", "value": "20" }
           ]
         }
+      }
+    },
+    {
+      "name": "6. POST record CV view (recruiter)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-Employer-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/jobs/{{jobId}}/applicants/{{breneoUserId}}/cv-view?external_user_id={{employerUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "jobs", "{{jobId}}", "applicants", "{{breneoUserId}}", "cv-view"],
+          "query": [{ "key": "external_user_id", "value": "{{employerUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "7. GET applicant CV views (employer)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Employer-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/jobs/{{jobId}}/applicant-cv-views?external_user_id={{employerUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "jobs", "{{jobId}}", "applicant-cv-views"],
+          "query": [{ "key": "external_user_id", "value": "{{employerUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "8. PATCH applicant CV view (employer)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Employer-Key", "value": "{{applicationKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"view_count\": 2\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/jobs/{{jobId}}/applicant-cv-views/{{cvViewId}}?external_user_id={{employerUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "jobs", "{{jobId}}", "applicant-cv-views", "{{cvViewId}}"],
+          "query": [{ "key": "external_user_id", "value": "{{employerUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "9. GET my CV views (applicant)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Application-Key", "value": "{{applicationKey}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/users/me/cv-views?external_user_id={{breneoUserId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "users", "me", "cv-views"],
+          "query": [{ "key": "external_user_id", "value": "{{breneoUserId}}" }]
+        }
+      }
+    },
+    {
+      "name": "10. PATCH acknowledge CV view (applicant)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Application-Key", "value": "{{applicationKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_user_id\": \"{{breneoUserId}}\",\n  \"acknowledge\": true\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/users/me/cv-views/{{cvViewId}}"
       }
     }
   ]

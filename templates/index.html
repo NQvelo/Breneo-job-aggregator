@@ -217,6 +217,45 @@
             color: var(--text-muted);
             font-size: 0.9em;
         }
+
+        .workflow-step {
+            display: flex;
+            gap: 16px;
+            padding: 14px 0;
+            border-bottom: 1px solid #e2e8f0;
+            align-items: flex-start;
+        }
+
+        .workflow-step:last-child { border-bottom: none; }
+
+        .step-num {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            background: var(--primary-color);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .step-body { flex: 1; }
+        .step-body strong { display: block; margin-bottom: 4px; }
+        .step-meta { font-size: 0.85rem; color: var(--text-muted); }
+        .auth-pill {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-right: 6px;
+            background: #f1f5f9;
+            color: #475569;
+        }
+        .auth-pill.employer { background: #dbeafe; color: #1e40af; }
+        .auth-pill.applicant { background: #dcfce7; color: #166534; }
     </style>
 </head>
 <body>
@@ -346,21 +385,130 @@
 
         <div class="filters-section">
             <h3>Employer API <span class="endpoint-badge">X-Employer-Key</span></h3>
-            <p style="font-size: 0.95rem; color: var(--text-muted);">Send header <code>X-Employer-Key</code> equal to server env <code>EMPLOYER_POST_SECRET</code> (from Breneo backend / BFF only). Company detail and members use numeric <code>company_id</code> in the path.</p>
+            <p style="font-size: 0.95rem; color: var(--text-muted);">Send header <code>X-Employer-Key</code> equal to server env <code>EMPLOYER_POST_SECRET</code> (from Breneo backend / BFF only). Company routes use numeric <code>company_id</code> in the path. Optional <code>?external_user_id=</code> for scoped staff access.</p>
             <table class="param-table">
                 <thead><tr><th>Methods</th><th>Path</th><th>Description</th></tr></thead>
                 <tbody>
-                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/companies</code></td><td>List (<code>?search=</code>, <code>?external_user_id=</code>); create company</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/companies</code></td><td>List (<code>?search=</code>, <code>?external_user_id=</code>); create (JSON or multipart <code>logo_upload</code>)</td></tr>
                     <tr><td><code>GET</code></td><td><code>/api/employer/companies/for-user</code></td><td>User’s companies (<code>?external_user_id=</code> required)</td></tr>
-                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code></td><td><code>/api/employer/companies/{company_id}</code></td><td>Detail / update; optional <code>?external_user_id=</code></td></tr>
-                    <tr><td><code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/companies/{company_id}/members</code></td><td>Add/remove staff (<code>external_user_id</code> in body or query)</td></tr>
-                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/staff-memberships</code></td><td>List (<code>?company_id=</code>, <code>?external_user_id=</code>); create</td></tr>
-                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code></td><td><code>/api/employer/staff-memberships/{id}</code></td><td>Membership CRUD</td></tr>
-                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/jobs</code></td><td>List (<code>?company_id=</code> or <code>?company=</code>); create job</td></tr>
-                    <tr><td><code>GET</code>, <code>PATCH</code>, <code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/jobs/{job_id}</code></td><td>Job CRUD; optional <code>?company_id=</code>; POST mirrors PATCH</td></tr>
+                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code></td><td><code>/api/employer/companies/{company_id}</code></td><td>Detail / update; DELETE removes uploaded logo only</td></tr>
+                    <tr><td><code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/companies/{company_id}/members</code></td><td>Add/remove staff; <code>status</code>: pending | member | admin</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/staff-memberships</code></td><td>List (<code>?company_id=</code>); create with profile + <code>status</code></td></tr>
+                    <tr><td><code>GET</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code></td><td><code>/api/employer/staff-memberships/{id}</code></td><td>Membership CRUD; admin rules on delete/status change</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/jobs/parse-description</code></td><td>Parse job text → responsibilities, qualifications, skills (Gemini)</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/employer/jobs</code></td><td>List (<code>?company_id=</code>); create employer job</td></tr>
+                    <tr><td><code>GET</code>, <code>PATCH</code>, <code>POST</code>, <code>DELETE</code></td><td><code>/api/employer/jobs/{job_id}</code></td><td>Job CRUD; POST mirrors PATCH</td></tr>
                 </tbody>
             </table>
         </div>
+
+        <div class="filters-section">
+            <h3>Job applications <span class="endpoint-badge">X-Application-Key</span></h3>
+            <p style="font-size: 0.95rem; color: var(--text-muted);">Applicant BFF: header <code>X-Application-Key</code> + <code>external_user_id</code>. Responses use envelope <code>{ success, message, data }</code>.</p>
+            <table class="param-table">
+                <thead><tr><th>Methods</th><th>Path</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>POST</code></td><td><code>/api/jobs/{job_id}/apply</code></td><td>Apply (employer-platform jobs only). Body: user id + email, name, surname</td></tr>
+                    <tr><td><code>DELETE</code></td><td><code>/api/jobs/{job_id}/application</code></td><td>Withdraw application</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/users/me/applications</code></td><td>My applications; includes <code>employer_viewed_cv</code> flags</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/jobs/{job_id}/applicants</code></td><td>Recruiter list (<code>X-Employer-Key</code>); CV view flags per applicant</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="filters-section">
+            <h3>CV view tracking — how it works</h3>
+            <p style="font-size: 0.95rem; color: var(--text-muted);">Table <code>job_applicant_cv_views</code> stores when employer staff open an applicant’s CV for a job. Unique per <code>(job, applicant_user_id, viewer_user_id)</code>. Repeat opens increment <code>view_count</code>.</p>
+
+            <div style="margin: 16px 0;">
+                <div class="workflow-step">
+                    <div class="step-num">1</div>
+                    <div class="step-body">
+                        <strong>Applicant applies</strong>
+                        <span class="auth-pill applicant">BFF</span>
+                        <code>POST /api/jobs/{job_id}/apply</code>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">2</div>
+                    <div class="step-body">
+                        <strong>Employer lists applicants</strong>
+                        <span class="auth-pill employer">Employer</span>
+                        <code>GET /api/jobs/{job_id}/applicants</code>
+                        <div class="step-meta">Each row includes <code>employer_viewed_cv</code>, <code>cv_viewed_by_me</code></div>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">3</div>
+                    <div class="step-body">
+                        <strong>Employer opens CV page → record view</strong>
+                        <span class="auth-pill employer">Employer</span>
+                        <code>POST /api/jobs/{job_id}/applicants/{applicant_user_id}/cv-view?external_user_id={staffId}</code>
+                        <div class="step-meta">Call once on page load. Creates row or increments <code>view_count</code>.</div>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">4</div>
+                    <div class="step-body">
+                        <strong>Applicant sees “Employer viewed your CV”</strong>
+                        <span class="auth-pill applicant">BFF</span>
+                        <code>GET /api/users/me/applications</code>
+                        <div class="step-meta">Fields: <code>employer_viewed_cv</code>, <code>employer_first_viewed_at</code>, <code>employer_cv_view_count</code></div>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">5</div>
+                    <div class="step-body">
+                        <strong>Applicant notification list</strong>
+                        <span class="auth-pill applicant">BFF</span>
+                        <code>GET /api/users/me/cv-views</code>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">6</div>
+                    <div class="step-body">
+                        <strong>Applicant acknowledges notification</strong>
+                        <span class="auth-pill applicant">BFF</span>
+                        <code>PATCH /api/users/me/cv-views/{cv_view_id}</code>
+                        <div class="step-meta">Body: <code>{ "acknowledge": true }</code> sets <code>applicant_acknowledged_at</code></div>
+                    </div>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-num">7</div>
+                    <div class="step-body">
+                        <strong>Employer admin CRUD (optional)</strong>
+                        <span class="auth-pill employer">Employer</span>
+                        <code>/api/jobs/{job_id}/applicant-cv-views[/{cv_view_id}]</code>
+                        <div class="step-meta">GET list · POST create · PATCH edit · DELETE remove</div>
+                    </div>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead><tr><th>Methods</th><th>Path</th><th>Who</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>POST</code></td><td><code>/api/jobs/{job_id}/applicants/{applicant_user_id}/cv-view</code></td><td>Employer</td><td>Record/increment view (shortcut)</td></tr>
+                    <tr><td><code>GET</code>, <code>POST</code></td><td><code>/api/jobs/{job_id}/applicant-cv-views</code></td><td>Employer</td><td>List or manually create rows</td></tr>
+                    <tr><td><code>GET</code>, <code>PATCH</code>, <code>DELETE</code></td><td><code>/api/jobs/{job_id}/applicant-cv-views/{cv_view_id}</code></td><td>Employer</td><td>Get, edit, delete one row</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/users/me/cv-views</code></td><td>Applicant</td><td>List views on my profile</td></tr>
+                    <tr><td><code>GET</code>, <code>PATCH</code></td><td><code>/api/users/me/cv-views/{cv_view_id}</code></td><td>Applicant</td><td>Get or acknowledge one view</td></tr>
+                </tbody>
+            </table>
+            <p><strong>Row fields:</strong> <code>id</code>, <code>job_id</code>, <code>job_title</code>, <code>company_name</code>, <code>applicant_user_id</code>, <code>viewer_user_id</code>, <code>first_viewed_at</code>, <code>last_viewed_at</code>, <code>view_count</code>, <code>applicant_acknowledged_at</code></p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Authentication</h2>
+        <table class="param-table">
+            <thead><tr><th>Mode</th><th>Header / param</th><th>Use for</th></tr></thead>
+            <tbody>
+                <tr><td>Public</td><td>—</td><td>Job search, companies, industries, health</td></tr>
+                <tr><td>Employer BFF</td><td><code>X-Employer-Key</code> + optional <code>?external_user_id=</code></td><td>Companies, staff, employer jobs, applicants, CV views</td></tr>
+                <tr><td>Application BFF</td><td><code>X-Application-Key</code> + <code>external_user_id</code></td><td>Apply, withdraw, my applications, my CV views</td></tr>
+            </tbody>
+        </table>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 12px;">Never expose secrets in browser clients. Application routes return <code>{ success, message, data }</code>.</p>
     </div>
 
     <div class="card">
@@ -393,9 +541,23 @@
             <li class="endpoint-item">
                 <div>
                     <span class="method get">GET</span>
+                    <a href="/api/users/me/applications" class="path">/api/users/me/applications</a>
+                </div>
+                <span class="desc">My applications (BFF auth required)</span>
+            </li>
+            <li class="endpoint-item">
+                <div>
+                    <span class="method get">GET</span>
                     <a href="/api/companies" class="path">/api/companies</a>
                 </div>
-                <span class="desc">Companies (public)</span>
+                <span class="desc">Companies (public job board)</span>
+            </li>
+            <li class="endpoint-item">
+                <div>
+                    <span class="method get">GET</span>
+                    <a href="/api/employer/companies" class="path">/api/employer/companies</a>
+                </div>
+                <span class="desc">Employer companies (key required)</span>
             </li>
             <li class="endpoint-item">
                 <div>

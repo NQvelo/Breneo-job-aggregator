@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Job, Company, CompanyStaffMembership, Industry, JobApplication
+from .models import Job, Company, CompanyStaffMembership, Industry, JobApplication, JobApplicantCvView
 
 
 class JobAdminForm(forms.ModelForm):
@@ -37,6 +37,23 @@ class JobApplicationAdmin(admin.ModelAdmin):
     )
     list_select_related = ("job", "job__company")
     autocomplete_fields = ("job",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(JobApplicantCvView)
+class JobApplicantCvViewAdmin(admin.ModelAdmin):
+    list_display = (
+        "job",
+        "applicant_user_id",
+        "viewer_user_id",
+        "view_count",
+        "applicant_acknowledged_at",
+        "first_viewed_at",
+        "last_viewed_at",
+    )
+    search_fields = ("applicant_user_id", "viewer_user_id", "job__title", "job__company__name")
+    list_select_related = ("job", "job__company", "application")
+    autocomplete_fields = ("job", "application")
     readonly_fields = ("created_at", "updated_at")
 
 

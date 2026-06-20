@@ -274,6 +274,48 @@ class JobApplication(models.Model):
         return f"{self.external_user_id} → job {self.job_id} ({self.status})"
 
 
+class JobApplicantCvView(models.Model):
+    """When employer staff open an applicant CV/profile for a specific job."""
+
+    job = models.ForeignKey(
+        "Job",
+        on_delete=models.CASCADE,
+        related_name="applicant_cv_views",
+    )
+    application = models.ForeignKey(
+        JobApplication,
+        on_delete=models.CASCADE,
+        related_name="cv_views",
+        null=True,
+        blank=True,
+    )
+    applicant_user_id = models.CharField(max_length=255, db_index=True)
+    viewer_user_id = models.CharField(max_length=255, db_index=True)
+    first_viewed_at = models.DateTimeField()
+    last_viewed_at = models.DateTimeField()
+    view_count = models.PositiveIntegerField(default=1)
+    applicant_acknowledged_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the applicant acknowledged/dismissed the view notification",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "job_applicant_cv_views"
+        ordering = ["-last_viewed_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job", "applicant_user_id", "viewer_user_id"],
+                name="uniq_job_applicant_cv_view",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"viewer {self.viewer_user_id} → applicant {self.applicant_user_id} job {self.job_id}"
+
+
 class Job(models.Model):
     title = models.CharField(max_length=500)
 

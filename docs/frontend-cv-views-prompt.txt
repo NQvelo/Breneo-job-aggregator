@@ -1,0 +1,201 @@
+FRONTEND UPDATE — CV VIEW TRACKING (EMPLOYER + APPLICANT CRUD)
+==============================================================
+
+Scope: track when employers open an applicant CV for a job, and let both sides
+read/update the job_applicant_cv_views dataset via BFF.
+
+Two auth modes (never mix secrets in the browser):
+  • Applicant BFF → X-Application-Key + external_user_id
+  • Employer BFF  → X-Employer-Key + external_user_id (staff user id)
+
+Base URL: ${JOB_AGGREGATOR_BASE_URL}/api/
+
+-------------------------------------------------------------------------------
+TABLE: job_applicant_cv_views
+-------------------------------------------------------------------------------
+
+Each row = one employer staff member viewed one applicant's CV for one job.
+
+Fields returned by API:
+
+  id
+  job_id
+  job_title
+  company_id
+  company_name
+  application_id
+  applicant_user_id      // Breneo user id of candidate
+  viewer_user_id         // Breneo user id of employer staff who viewed
+  first_viewed_at
+  last_viewed_at
+  view_count
+  applicant_acknowledged_at   // null until applicant dismisses/acknowledges
+  created_at
+  updated_at
+
+Unique per (job_id, applicant_user_id, viewer_user_id).
+
+Also embedded on GET /api/users/me/applications (summary flags):
+  employer_viewed_cv, employer_first_viewed_at, employer_last_viewed_at,
+  employer_cv_view_count
+
+-------------------------------------------------------------------------------
+EMPLOYER API (recruiter dashboard)
+-------------------------------------------------------------------------------
+
+Auth: X-Employer-Key on every call.
+Send ?external_user_id=<loggedInStaffId> for permission checks.
+
+1) OPEN CV PAGE (auto track — call once when page loads)
+   POST /api/jobs/{jobId}/applicants/{applicantUserId}/cv-view?external_user_id={staffId}
+   → Creates row or increments view_count + updates last_viewed_at
+
+2) LIST all CV views for a job
+   GET /api/jobs/{jobId}/applicant-cv-views?external_user_id={staffId}
+   → { success, message, data: JobApplicantCvView[] }
+
+3) CREATE row manually (admin correction / import)
+   POST /api/jobs/{jobId}/applicant-cv-views?external_user_id={staffId}
+   Body:
+   {
+     "applicant_user_id": "uuid",
+     "viewer_user_id": "uuid",        // optional; defaults to staffId
+     "view_count": 1,                 // optional
+     "first_viewed_at": "ISO8601",    // optional
+     "last_viewed_at": "ISO8601"      // optional
+   }
+   → 201 or 409 if row already exists (use PATCH or shortcut POST instead)
+
+4) GET one row
+   GET /api/jobs/{jobId}/applicant-cv-views/{cvViewId}?external_user_id={staffId}
+
+5) EDIT row
+   PATCH /api/jobs/{jobId}/applicant-cv-views/{cvViewId}?external_user_id={staffId}
+   Body (any of):
+   {
+     "viewer_user_id": "uuid",
+     "view_count": 3,
+     "first_viewed_at": "ISO8601",
+     "last_viewed_at": "ISO8601"
+   }
+
+6) DELETE row
+   DELETE /api/jobs/{jobId}/applicant-cv-views/{cvViewId}?external_user_id={staffId}
+
+Employer UI suggestions:
+  • Applicant list: badge "Viewed" if cv_viewed_by_me or employer_viewed_cv
+  • CV detail page: POST cv-view on mount (Fix 1 above)
+  • Admin table: use GET/PATCH/DELETE applicant-cv-views for corrections
+
+--- BFF example: record view on CV page load ---
+
+  // app/api/app/employer/jobs/[jobId]/applicants/[applicantId]/cv-view/route.ts
+  export async function POST(req, { params }) {
+    const staff = await getSessionUser();
+    const url = new URL(
+      `${AGGREGATOR}/api/jobs/${params.jobId}/applicants/${params.applicantId}/cv-view`
+    );
+    url.searchParams.set("external_user_id", String(staff.id));
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "X-Employer-Key": process.env.EMPLOYER_POST_SECRET! },
+    });
+    return NextResponse.json(await res.json(), { status: res.status });
+  }
+
+-------------------------------------------------------------------------------
+APPLICANT API (job seeker)
+-------------------------------------------------------------------------------
+
+Auth: X-Application-Key + external_user_id (session user).
+
+Applicants CANNOT create fake employer views or delete rows.
+They CAN list their views and acknowledge notifications.
+
+1) LIST my CV views (notification center)
+   GET /api/users/me/cv-views?external_user_id={userId}
+   → data: JobApplicantCvView[]
+
+2) GET one view
+   GET /api/users/me/cv-views/{cvViewId}?external_user_id={userId}
+
+3) ACKNOWLEDGE / dismiss notification
+   PATCH /api/users/me/cv-views/{cvViewId}?external_user_id={userId}
+   Body: { "acknowledge": true }
+   // or { "acknowledge": false } to clear
+   // or { "applicant_acknowledged_at": "ISO8601" | null }
+
+--- BFF example: acknowledge ---
+
+  await fetch(`${AGGREGATOR}/api/users/me/cv-views/${cvViewId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Application-Key": process.env.APPLICATION_API_SECRET!,
+    },
+    body: JSON.stringify({
+      external_user_id: String(user.id),
+      acknowledge: true,
+    }),
+  });
+
+Applicant UI suggestions:
+  • "My applications" row: show "Employer viewed your CV" when employer_viewed_cv
+  • Bell / notifications: GET /users/me/cv-views, filter where
+    applicant_acknowledged_at === null
+  • Tap notification → PATCH acknowledge: true
+
+-------------------------------------------------------------------------------
+TYPESCRIPT
+-------------------------------------------------------------------------------
+
+  interface JobApplicantCvView {
+    id: number;
+    job_id: number;
+    job_title: string;
+    company_id: number;
+    company_name: string;
+    application_id: number | null;
+    applicant_user_id: string;
+    viewer_user_id: string;
+    first_viewed_at: string;
+    last_viewed_at: string;
+    view_count: number;
+    applicant_acknowledged_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }
+
+  function isUnreadCvView(row: JobApplicantCvView): boolean {
+    return row.applicant_acknowledged_at == null;
+  }
+
+-------------------------------------------------------------------------------
+PERMISSION SUMMARY
+-------------------------------------------------------------------------------
+
+| Action              | Employer (staff)     | Applicant        |
+|---------------------|----------------------|------------------|
+| List job views      | Yes                  | —                |
+| Create / increment  | Yes                  | No               |
+| Edit counts/dates   | Yes                  | No               |
+| Delete              | Yes                  | No               |
+| List own views      | —                    | Yes              |
+| Acknowledge         | No                   | Yes (own rows)   |
+
+403 = wrong staff or not your row. 404 = job/application/row not found. 409 = duplicate create.
+
+-------------------------------------------------------------------------------
+QUICK CHECKLIST
+-------------------------------------------------------------------------------
+
+[ ] Employer CV page calls POST .../cv-view on load
+[ ] Applicant "My applications" shows employer_viewed_cv badge
+[ ] Notification list uses GET /users/me/cv-views
+[ ] Dismiss sets PATCH acknowledge: true
+[ ] All calls server-side with correct secret header
+[ ] employerUserId / breneoUserId in Postman for recruiter routes
+
+Postman: postman/breneo-job-applications.postman_collection.json
+
+End of prompt.

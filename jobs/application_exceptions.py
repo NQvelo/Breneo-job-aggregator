@@ -23,6 +23,16 @@ class ApplicationNotFoundError(JobApplicationError):
     error_code = "application_not_found"
 
 
+class CvViewNotFoundError(JobApplicationError):
+    status_code = 404
+    error_code = "cv_view_not_found"
+
+
+class CvViewAlreadyExistsError(JobApplicationError):
+    status_code = 409
+    error_code = "cv_view_already_exists"
+
+
 class JobNotAcceptingApplicationsError(JobApplicationError):
     status_code = 400
     error_code = "job_not_accepting_applications"

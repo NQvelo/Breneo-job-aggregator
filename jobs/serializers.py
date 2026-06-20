@@ -704,7 +704,60 @@ class JobApplicationUserFieldsMixin(serializers.Serializer):
         return self.get_external_user_surname(obj)
 
 
-class JobApplicationSerializer(JobApplicationUserFieldsMixin, serializers.ModelSerializer):
+class ApplicantCvViewFieldsMixin(serializers.Serializer):
+    employer_viewed_cv = serializers.SerializerMethodField()
+    employer_first_viewed_at = serializers.SerializerMethodField()
+    employer_last_viewed_at = serializers.SerializerMethodField()
+    employer_cv_view_count = serializers.SerializerMethodField()
+    cv_viewed_by_me = serializers.SerializerMethodField()
+    cv_my_first_viewed_at = serializers.SerializerMethodField()
+    cv_my_last_viewed_at = serializers.SerializerMethodField()
+    cv_my_view_count = serializers.SerializerMethodField()
+
+    def _cv_summary(self, obj) -> dict:
+        key = f"{obj.job_id}:{obj.external_user_id}"
+        summaries = self.context.get("cv_view_summaries") or {}
+        return summaries.get(key) or {
+            "employer_viewed_cv": False,
+            "employer_first_viewed_at": None,
+            "employer_last_viewed_at": None,
+            "employer_cv_view_count": 0,
+            "cv_viewed_by_me": False,
+            "cv_my_first_viewed_at": None,
+            "cv_my_last_viewed_at": None,
+            "cv_my_view_count": 0,
+        }
+
+    def get_employer_viewed_cv(self, obj) -> bool:
+        return bool(self._cv_summary(obj)["employer_viewed_cv"])
+
+    def get_employer_first_viewed_at(self, obj):
+        return self._cv_summary(obj)["employer_first_viewed_at"]
+
+    def get_employer_last_viewed_at(self, obj):
+        return self._cv_summary(obj)["employer_last_viewed_at"]
+
+    def get_employer_cv_view_count(self, obj) -> int:
+        return int(self._cv_summary(obj)["employer_cv_view_count"] or 0)
+
+    def get_cv_viewed_by_me(self, obj) -> bool:
+        return bool(self._cv_summary(obj)["cv_viewed_by_me"])
+
+    def get_cv_my_first_viewed_at(self, obj):
+        return self._cv_summary(obj)["cv_my_first_viewed_at"]
+
+    def get_cv_my_last_viewed_at(self, obj):
+        return self._cv_summary(obj)["cv_my_last_viewed_at"]
+
+    def get_cv_my_view_count(self, obj) -> int:
+        return int(self._cv_summary(obj)["cv_my_view_count"] or 0)
+
+
+class JobApplicationSerializer(
+    JobApplicationUserFieldsMixin,
+    ApplicantCvViewFieldsMixin,
+    serializers.ModelSerializer,
+):
     """User-facing application record (includes nested job)."""
 
     job_id = serializers.IntegerField(source="job.id", read_only=True)
@@ -729,12 +782,20 @@ class JobApplicationSerializer(JobApplicationUserFieldsMixin, serializers.ModelS
             "status",
             "is_withdrawn",
             "withdrawn_at",
+            "employer_viewed_cv",
+            "employer_first_viewed_at",
+            "employer_last_viewed_at",
+            "employer_cv_view_count",
             "created_at",
             "updated_at",
         ]
 
 
-class JobApplicantSerializer(JobApplicationUserFieldsMixin, serializers.ModelSerializer):
+class JobApplicantSerializer(
+    JobApplicationUserFieldsMixin,
+    ApplicantCvViewFieldsMixin,
+    serializers.ModelSerializer,
+):
     """Employer view: applicant with stored contact fields + optional breneo profile merge."""
 
     job_id = serializers.IntegerField(source="job.id", read_only=True)
@@ -756,6 +817,14 @@ class JobApplicantSerializer(JobApplicationUserFieldsMixin, serializers.ModelSer
             "job_id",
             "applied_at",
             "status",
+            "employer_viewed_cv",
+            "employer_first_viewed_at",
+            "employer_last_viewed_at",
+            "employer_cv_view_count",
+            "cv_viewed_by_me",
+            "cv_my_first_viewed_at",
+            "cv_my_last_viewed_at",
+            "cv_my_view_count",
             "created_at",
             "updated_at",
         ]

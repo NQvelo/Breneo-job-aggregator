@@ -53,6 +53,33 @@ OpenAPI: `/api/schema/` · Swagger: `/api/docs/` · ReDoc: `/api/redoc/`
 
 ---
 
+## Job applications
+
+**Auth:** `X-Application-Key` + `external_user_id`. Envelope: `{ success, message, data }`.
+
+| Methods | Path | Description |
+|---------|------|-------------|
+| POST | `/api/jobs/{job_id}/apply` | Apply to employer job. |
+| DELETE | `/api/jobs/{job_id}/application` | Withdraw application. |
+| GET | `/api/users/me/applications` | My applications (includes `employer_viewed_cv`). |
+| GET | `/api/jobs/{job_id}/applicants` | Recruiter applicants (`X-Employer-Key`). |
+
+---
+
+## CV view tracking
+
+See **`GET /api/overview/`** field `cv_view_workflow` for the full step-by-step flow.
+
+| Methods | Path | Who | Description |
+|---------|------|-----|-------------|
+| POST | `/api/jobs/{job_id}/applicants/{applicant_user_id}/cv-view` | Employer | Record/increment view |
+| GET, POST | `/api/jobs/{job_id}/applicant-cv-views` | Employer | List / create rows |
+| GET, PATCH, DELETE | `/api/jobs/{job_id}/applicant-cv-views/{cv_view_id}` | Employer | CRUD one row |
+| GET | `/api/users/me/cv-views` | Applicant | List my CV views |
+| GET, PATCH | `/api/users/me/cv-views/{cv_view_id}` | Applicant | Get / acknowledge |
+
+---
+
 ## Employer
 
 **Auth:** `X-Employer-Key: <EMPLOYER_POST_SECRET>` **or** Django session user in group **Employer**.  
@@ -70,6 +97,7 @@ Company **detail / members** routes use the numeric **`company_id`** (primary ke
 | GET, PUT, PATCH, DELETE | `/api/employer/staff-memberships/{id}` | Membership CRUD. `status`: pending, member, admin. DELETE requires admin. |
 | GET, POST | `/api/employer/jobs` | GET: list (`?company_id=` or `?company=`). POST: create job. |
 | GET, PATCH, POST, DELETE | `/api/employer/jobs/{job_id}` | Job CRUD; POST mirrors PATCH; optional `?company_id=` to scope. |
+| POST | `/api/jobs/parse-description` | Parse job description via Gemini. |
 
 ---
 

@@ -17,6 +17,8 @@ from .breneo_user import external_user_id_from_request
 from .pagination import ApplicationPagination
 from .permissions import CanViewJobApplicants, IsApplicationUserAuthenticated
 from .serializers import JobApplicantSerializer, JobApplicationSerializer
+from .serializers_cv_views import JobApplicantCvViewSerializer
+from .services.applicant_cv_views import ApplicantCvViewService
 from .services.job_applications import JobApplicationService
 
 logger = logging.getLogger(__name__)
@@ -71,10 +73,24 @@ _envelope = inline_serializer(
 
 class JobApplicationBaseView(APIView):
     service_class = JobApplicationService
+    cv_view_service_class = ApplicantCvViewService
     pagination_class = ApplicationPagination
 
     def get_service(self) -> JobApplicationService:
         return self.service_class()
+
+    def get_cv_view_service(self) -> ApplicantCvViewService:
+        return self.cv_view_service_class()
+
+    def _serializer_context(self, request, applications, *, viewer_user_id: str | None = None):
+        apps = list(applications) if applications is not None else []
+        cv_summaries = {}
+        if apps:
+            cv_summaries = self.get_cv_view_service().summaries_for_application_list(
+                apps,
+                viewer_user_id=viewer_user_id,
+            )
+        return {"request": request, "cv_view_summaries": cv_summaries}
 
     def get_paginator(self):
         return self.pagination_class()
@@ -162,7 +178,10 @@ class JobApplyView(JobApplicationBaseView):
                 details=exc.details,
             )
         return success_response(
-            JobApplicationSerializer(application, context={"request": request}).data,
+            JobApplicationSerializer(
+                application,
+                context=self._serializer_context(request, [application]),
+            ).data,
             message="Application submitted successfully",
             status_code=status.HTTP_201_CREATED,
         )
@@ -192,7 +211,10 @@ class JobWithdrawApplicationView(JobApplicationBaseView):
                 details=exc.details,
             )
         return success_response(
-            JobApplicationSerializer(application, context={"request": request}).data,
+            JobApplicationSerializer(
+                application,
+                context=self._serializer_context(request, [application]),
+            ).data,
             message="Application withdrawn successfully",
         )
 
@@ -213,15 +235,15 @@ class UserApplicationsView(JobApplicationBaseView):
         user_id = get_application_user_id(request)
         qs = self.get_service().list_user_applications(user_id, sort=self._sort_param(request))
         paginator, page = self.paginate_queryset(request, qs)
+        items = list(page) if page is not None else list(qs)
+        serializer_ctx = self._serializer_context(request, items)
         if page is not None:
-            data = JobApplicationSerializer(
-                page, many=True, context={"request": request}
-            ).data
+            data = JobApplicationSerializer(page, many=True, context=serializer_ctx).data
             return paginator.build_response(
                 data,
                 message="Applications retrieved successfully",
             )
-        data = JobApplicationSerializer(qs, many=True, context={"request": request}).data
+        data = JobApplicationSerializer(qs, many=True, context=serializer_ctx).data
         return success_response(
             {"items": data, "pagination": None},
             message="Applications retrieved successfully",
@@ -266,7 +288,11 @@ class JobApplicantsView(JobApplicationBaseView):
             )
 
         paginator, page = self.paginate_queryset(request, applications)
-        serializer_ctx = {"request": request, "user_profiles": profiles}
+        items = list(page) if page is not None else list(applications)
+        serializer_ctx = {
+            **self._serializer_context(request, items, viewer_user_id=scoped_uid or None),
+            "user_profiles": profiles,
+        }
         if page is not None:
             data = JobApplicantSerializer(page, many=True, context=serializer_ctx).data
             response = paginator.build_response(
@@ -287,3 +313,50 @@ class JobApplicantsView(JobApplicationBaseView):
                 "company_name": job.company.name if job.company_id else None,
             }
         return response
+
+
+class JobApplicantCvViewRecordView(JobApplicationBaseView):
+    """POST /api/jobs/<job_id>/applicants/<applicant_user_id>/cv-view"""
+
+    authentication_classes = []
+    permission_classes = [CanViewJobApplicants]
+
+    @extend_schema(
+        tags=["Job applications"],
+        summary="Record employer CV view",
+        parameters=[
+            OpenApiParameter(
+                name="external_user_id",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+            ),
+        ],
+        responses={200: _envelope, 403: _envelope, 404: _envelope},
+    )
+    def post(self, request, job_id: int, applicant_user_id: str):
+        viewer_user_id = external_user_id_from_request(request) or get_application_user_id(request)
+        applicant_user_id = (applicant_user_id or "").strip()
+        if not applicant_user_id:
+            return error_response(
+                "applicant_user_id is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error="invalid_request",
+            )
+        try:
+            row = self.get_cv_view_service().record_cv_view(
+                job_id,
+                applicant_user_id,
+                viewer_user_id or "",
+            )
+        except JobApplicationError as exc:
+            return error_response(
+                exc.message,
+                status_code=exc.status_code,
+                error=exc.error_code,
+                details=exc.details,
+            )
+        return success_response(
+            JobApplicantCvViewSerializer(row).data,
+            message="CV view recorded",
+        )
