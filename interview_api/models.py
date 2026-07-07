@@ -25,10 +25,22 @@ class InterviewQuestion(models.Model):
         on_delete=models.CASCADE,
         related_name="questions",
     )
+    order = models.PositiveSmallIntegerField(default=1)
     question_text = models.TextField()
+    question_audio = models.FileField(
+        upload_to="interview_questions/",
+        storage=interview_audio_storage,
+        blank=True,
+    )
 
     class Meta:
-        ordering = ["id"]
+        ordering = ["order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interview", "order"],
+                name="interview_api_unique_question_order",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.question_text[:80]

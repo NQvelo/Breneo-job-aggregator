@@ -19,10 +19,10 @@ from .auth import resolve_user_id
 from .exceptions import InterviewAPIError
 from .models import InterviewQuestion
 from .serializers import (
-    InterviewEvaluationResponseSerializer,
     StartInterviewResponseSerializer,
     StartInterviewSerializer,
     SubmitAudioSerializer,
+    SubmitInterviewResponseSerializer,
 )
 from .services.interview_service import InterviewService
 
@@ -71,7 +71,10 @@ class StartInterviewView(InterviewBaseView):
             "interview": interview,
             "question": question,
         }
-        return Response(StartInterviewResponseSerializer(payload).data, status=status.HTTP_201_CREATED)
+        return Response(
+            StartInterviewResponseSerializer(payload, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SubmitAudioView(InterviewBaseView):
@@ -79,7 +82,7 @@ class SubmitAudioView(InterviewBaseView):
 
     @extend_schema(
         request={"multipart/form-data": SubmitAudioSerializer},
-        responses={200: InterviewEvaluationResponseSerializer},
+        responses={200: SubmitInterviewResponseSerializer},
         tags=["Mock interview"],
     )
     def post(self, request, question_id):
@@ -102,7 +105,7 @@ class SubmitAudioView(InterviewBaseView):
         uploaded_file = serializer.validated_data["uploaded_file"]
 
         try:
-            evaluation = self.get_service().submit_audio(
+            result = self.get_service().submit_audio(
                 question=question,
                 audio_file=uploaded_file,
             )
@@ -123,6 +126,9 @@ class SubmitAudioView(InterviewBaseView):
             )
 
         return Response(
-            InterviewEvaluationResponseSerializer.from_evaluation(evaluation),
+            SubmitInterviewResponseSerializer.from_submit_result(
+                result,
+                context={"request": request},
+            ),
             status=status.HTTP_200_OK,
         )

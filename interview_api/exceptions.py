@@ -23,3 +23,8 @@ class LLMServiceError(InterviewAPIError):
 class LLMResponseParseError(InterviewAPIError):
     def __init__(self, message: str = "LLM returned invalid JSON."):
         super().__init__(message, status_code=502)
+
+
+class TTSServiceError(InterviewAPIError):
+    def __init__(self, message: str = "Georgian speech synthesis failed."):
+        super().__init__(message, status_code=502)

@@ -20,7 +20,7 @@ class InterviewAdmin(admin.ModelAdmin):
 
 @admin.register(InterviewQuestion)
 class InterviewQuestionAdmin(admin.ModelAdmin):
-    list_display = ("id", "interview", "question_text")
+    list_display = ("id", "interview", "order", "question_text")
     search_fields = ("question_text",)
     readonly_fields = ("id",)
 

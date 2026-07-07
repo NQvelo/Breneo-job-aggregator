@@ -21,6 +21,9 @@ Generate exactly ONE highly relevant, role-specific behavioral or technical inte
 Rules:
 - The question must be in Georgian.
 - Tailor difficulty and topic to the provided job_position.
+- This is question {question_number} of {total_questions} in a single interview session.
+- Vary topics across the session (technical depth, behavioral STAR, problem-solving, teamwork, etc.).
+- Do NOT repeat or closely paraphrase any question listed in previous_questions.
 - Return ONLY raw JSON: {{"question_text": "<Georgian question>"}}
 - No markdown, no extra keys."""
 
@@ -119,9 +122,26 @@ def _chat_completion(system_prompt: str, user_prompt: str) -> str:
         raise LLMServiceError("Unexpected LLM response shape.") from exc
 
 
-def generate_interview_question(job_position: str) -> str:
-    user_prompt = f"job_position: {job_position.strip()}"
-    raw = _chat_completion(QUESTION_SYSTEM_PROMPT, user_prompt)
+def generate_interview_question(
+    job_position: str,
+    *,
+    question_number: int = 1,
+    total_questions: int = 10,
+    previous_questions: list[str] | None = None,
+) -> str:
+    previous = previous_questions or []
+    previous_block = "\n".join(f"- {q}" for q in previous) if previous else "(none yet)"
+    system_prompt = QUESTION_SYSTEM_PROMPT.format(
+        question_number=question_number,
+        total_questions=total_questions,
+    )
+    user_prompt = (
+        f"job_position: {job_position.strip()}\n"
+        f"question_number: {question_number}\n"
+        f"total_questions: {total_questions}\n"
+        f"previous_questions:\n{previous_block}"
+    )
+    raw = _chat_completion(system_prompt, user_prompt)
     payload = _parse_json_response(raw)
     question_text = (payload.get("question_text") or "").strip()
     if not question_text:

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from rest_framework import serializers
 
+from interview_api.constants import MAX_INTERVIEW_QUESTIONS
 from interview_api.models import Interview, InterviewAttempt, InterviewQuestion
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
@@ -24,10 +25,33 @@ class StartInterviewSerializer(serializers.Serializer):
 class InterviewQuestionSerializer(serializers.ModelSerializer):
     interview_id = serializers.UUIDField(source="interview.id", read_only=True)
     job_position = serializers.CharField(source="interview.job_position", read_only=True)
+    question_number = serializers.IntegerField(source="order", read_only=True)
+    total_questions = serializers.SerializerMethodField()
+    question_audio_url = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewQuestion
-        fields = ("id", "interview_id", "job_position", "question_text")
+        fields = (
+            "id",
+            "interview_id",
+            "job_position",
+            "question_text",
+            "question_number",
+            "total_questions",
+            "question_audio_url",
+        )
+
+    def get_total_questions(self, obj) -> int:
+        return MAX_INTERVIEW_QUESTIONS
+
+    def get_question_audio_url(self, obj) -> str | None:
+        if not obj.question_audio:
+            return None
+        request = self.context.get("request")
+        url = obj.question_audio.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class InterviewSerializer(serializers.ModelSerializer):
@@ -125,3 +149,27 @@ class InterviewEvaluationResponseSerializer(serializers.Serializer):
             "missing_concepts": evaluation.missing_concepts,
             "recommended_answer": evaluation.recommended_answer,
         }
+
+
+class SubmitInterviewResponseSerializer(InterviewEvaluationResponseSerializer):
+    question_number = serializers.IntegerField(min_value=1)
+    total_questions = serializers.IntegerField(min_value=1)
+    interview_complete = serializers.BooleanField()
+    next_question = InterviewQuestionSerializer(allow_null=True)
+
+    @classmethod
+    def from_submit_result(cls, result, *, context=None) -> dict:
+        payload = cls.from_evaluation(result.evaluation)
+        payload.update(
+            {
+                "question_number": result.question_number,
+                "total_questions": result.total_questions,
+                "interview_complete": result.interview_complete,
+                "next_question": (
+                    InterviewQuestionSerializer(result.next_question, context=context or {}).data
+                    if result.next_question is not None
+                    else None
+                ),
+            }
+        )
+        return payload
