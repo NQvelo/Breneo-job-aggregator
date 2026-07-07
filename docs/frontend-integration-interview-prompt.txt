@@ -1,5 +1,31 @@
 You are an expert Frontend UI/UX Developer working on the "Breneo" platform (breneoapp — Vite + React SPA).
-Task: Build a beautiful, mobile-first, interactive HR Mock Interview interface with a live camera feed and a comprehensive AI evaluation dashboard.
+
+-------------------------------------------------------------------------------
+STATUS — READ FIRST
+-------------------------------------------------------------------------------
+
+BACKEND (job-aggregator): READY — interview_api on Railway
+  POST /api/v1/interview/start/
+  POST /api/v1/interview/submit-audio/<question_id>/
+  Requires aggregator env: EMPLOYER_POST_SECRET, GROQ_API_KEY (or OpenAI vars).
+
+BFF (breneoapp server): READY — server/interviewRoutes.mjs + employer-jobs-proxy.mjs
+  Forwards with X-Employer-Key (same as employer job POST), injects user_id.
+
+FRONTEND (breneoapp React): NOT IMPLEMENTED YET — build from this prompt
+  Missing / empty today:
+    src/api/interview/interviewApi.ts
+    src/api/interview/types.ts
+    src/components/interviews/InterviewContainer.tsx
+    src/components/interviews/InterviewReport.tsx
+    src/pages/user/InterviewsPage.tsx
+    Route /interviews in AppRoutes.tsx (nav link may exist; page + API client do not)
+
+Do NOT assume interviewApi.ts or UI components already exist. Implement them following
+the patterns below (same as employer jobs + job applications BFF).
+
+Task: Build a beautiful, mobile-first, interactive HR Mock Interview interface with a live
+camera feed and a comprehensive AI evaluation dashboard.
 
 Tech Stack: React, TypeScript, Tailwind CSS, Lucide React (for icons).
 
@@ -7,10 +33,10 @@ Follow the SAME auth / BFF pattern as employer jobs and job applications in bren
 Do NOT call the raw job-aggregator host from the browser for interview routes.
 
 -------------------------------------------------------------------------------
-AUTH — THREE LAYERS (match breneoapp; see src/api/interview/interviewApi.ts)
+AUTH — THREE LAYERS
 -------------------------------------------------------------------------------
 
-LAYER 1 — BROWSER (React SPA)
+LAYER 1 — BROWSER (React SPA) — TO IMPLEMENT
 - User is logged into Breneo; TokenManager holds the Breneo access JWT.
 - Interview API calls use employerBffFetch() — NOT direct fetch to JOB_AGGREGATOR_BASE_URL.
 - Browser sends ONLY:
@@ -36,7 +62,7 @@ BFF env (server-only — .env, not VITE_*):
   JOB_AGGREGATOR_EMPLOYER_KEY=<same as aggregator EMPLOYER_POST_SECRET>
   MAIN_API_BASE_URL=<Breneo API used at login — must match token issuer>
 
-LAYER 3 — JOB AGGREGATOR (Django interview_api)
+LAYER 3 — JOB AGGREGATOR (Django interview_api) — already deployed
 - Accepts BFF: X-Employer-Key (or X-Application-Key) + user_id in body/query.
 - Also accepts direct Breneo JWT (Postman/tests): Authorization: Bearer <jwt> or Bearer dev:<id> in DEBUG.
 - Stores user_id as plain text on Interview — no Django User FK.
@@ -46,28 +72,28 @@ CLIENT BASE URL (browser)
 - Local dev: window.location.origin (Vite proxy → BFF).
 - Static hosts (dashboard.breneo.app): set VITE_EMPLOYER_JOBS_API_BASE_URL or VITE_EMPLOYER_BFF_URL.
 
-EXISTING CLIENT MODULE (reuse — do not reinvent)
+CLIENT MODULE — CREATE (do not reinvent; mirror employerBffFetch usage)
   src/api/interview/interviewApi.ts
     startInterview(jobPosition)           → POST /api/v1/interview/start/
     submitInterviewAudio(questionId, blob) → POST /api/v1/interview/submit-audio/{id}/
+  src/api/interview/types.ts — StartInterviewResponse, InterviewEvaluation (snake_case JSON)
   Both use employerBffFetch from src/api/employer/employerBffClient.ts.
 
-ERRORS
+ERRORS (handle in UI)
 - 401 browser: missing/expired Breneo JWT (TokenManager refresh).
 - 401 BFF: profile validation failed (JWT invalid/expired or MAIN_API_BASE_URL mismatch).
-- 403 after profile OK: JOB_AGGREGATOR_EMPLOYER_KEY ≠ aggregator EMPLOYER_POST_SECRET (BFF secret rejected upstream).
+- 403 after profile OK: JOB_AGGREGATOR_EMPLOYER_KEY ≠ aggregator EMPLOYER_POST_SECRET.
 - 404 submit: wrong question_id or interview owned by another user_id.
+- 400: missing job_position, empty/invalid audio, file > 25 MB.
+- 502: Whisper/LLM failure (aggregator missing GROQ_API_KEY or upstream error) — Georgian retry message.
 
 DEBUG (Network tab — ignore Vite HMR)
-- `GET http://localhost:8080/` with `Accept: text/x-vite-ping` is NOT the interview API; it is Vite dev heartbeat.
-- The real call is `POST /api/v1/interview/start/` (or submit-audio) on the same origin (8080), proxied to employer-jobs-proxy :8787.
-- BFF validates JWT via GET MAIN_API_BASE_URL/api/profile/ — must match login host (see breneoapp .env MAIN_API_BASE_URL).
-- Run `npm run dev` in breneoapp (starts Vite + employer-jobs-proxy); interview routes 502/ECONNREFUSED if only `npm run dev:vite`.
-- 400: missing job_position, empty/invalid audio, file > 25 MB.
-- 502: Whisper/LLM failure — show Georgian retry message.
+- `GET http://localhost:8080/` with `Accept: text/x-vite-ping` is NOT the interview API.
+- Real call: `POST /api/v1/interview/start/` on same origin (8080) → proxy → :8787 BFF.
+- Run `npm run dev` in breneoapp (Vite + employer-jobs-proxy); not `npm run dev:vite` alone.
 
 -------------------------------------------------------------------------------
-API FLOW (BFF paths — what the React app calls)
+API FLOW (BFF paths — what the React app will call)
 -------------------------------------------------------------------------------
 
 1) START SESSION
@@ -80,6 +106,7 @@ Body (browser sends):
 }
 
 BFF upstream → POST {JOB_AGGREGATOR_BASE_URL}/api/v1/interview/start/
+Headers: X-Employer-Key: <secret>
 Body (BFF adds user_id):
 {
   "job_position": "Python Developer",
@@ -104,6 +131,7 @@ Content-Type: multipart/form-data
 Form field: audio_file = MediaRecorder Blob (video/webm or audio/webm, max 25 MB)
 
 BFF upstream → POST .../submit-audio/<question_id>/?user_id=<breneo-user-id>
+Headers: X-Employer-Key: <secret>
 (same multipart body; BFF does not expose user_id to browser)
 
 Response 200 → pass to InterviewReport:
@@ -123,11 +151,8 @@ Response 200 → pass to InterviewReport:
   "recommended_answer": "..."
 }
 
-TYPESCRIPT TYPES (snake_case — src/api/interview/types.ts)
-- StartInterviewResponse, InterviewEvaluation — match JSON above.
-
 -------------------------------------------------------------------------------
-ARCHITECTURE — two main components
+ARCHITECTURE — components TO BUILD
 -------------------------------------------------------------------------------
 
 1. InterviewContainer.tsx (src/components/interviews/InterviewContainer.tsx)
@@ -142,7 +167,7 @@ ARCHITECTURE — two main components
 - requires_retake → "თავიდან ცდა" → new startInterview() (new session).
 - Handle NotAllowedError / NotFoundError / InterviewApiError with Georgian copy.
 
-2. InterviewReport.tsx
+2. InterviewReport.tsx (src/components/interviews/InterviewReport.tsx)
 - Props: evaluation: InterviewEvaluation, onRetake?: () => void
 - Circular SVG score; green PASSED / red FAILED (threshold 75).
 - Three metric bars with Georgian labels from API.
@@ -150,7 +175,13 @@ ARCHITECTURE — two main components
 - Accordion: user_transcript.
 - Card: "HR-ის რეკომენდაცია" → recommended_answer.
 
-PAGE: src/pages/user/InterviewsPage.tsx — route /interviews in AppRoutes.tsx.
+3. InterviewsPage.tsx (src/pages/user/InterviewsPage.tsx)
+- Route /interviews in AppRoutes.tsx — wire InterviewContainer.
+
+Reference implementations in breneoapp (copy patterns, not interview code):
+  src/api/employer/employerBffClient.ts — employerBffFetch + JWT
+  src/api/jobs/jobApplicationsApi.ts — same-origin BFF base URL
+  src/api/employer/publishJob.ts — employer job POST via BFF
 
 -------------------------------------------------------------------------------
 COMPARE TO OTHER AGGREGATOR FEATURES IN BRENEOAPP
@@ -165,11 +196,13 @@ COMPARE TO OTHER AGGREGATOR FEATURES IN BRENEOAPP
 Never mix patterns: interview uses the same X-Employer-Key as employer jobs, not Authorization: Bearer for the secret.
 
 -------------------------------------------------------------------------------
-POSTMAN (aggregator only — debugging backend, not frontend flow)
+POSTMAN (aggregator only — backend QA, not frontend flow)
 -------------------------------------------------------------------------------
 POST https://<aggregator>/api/v1/interview/start/
 Header: X-Employer-Key: <EMPLOYER_POST_SECRET>
 Body: { "job_position": "...", "user_id": "test-user-1" }
 OR Authorization: Bearer dev:test-user-1        // DEBUG only (no user_id)
+
+Aggregator also needs GROQ_API_KEY for 201 on start (question generation).
 
 Use snake_case. See docs/frontend-dual-base-url-prompt.txt for two-base-URL rules.

@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from interview_api.storage import interview_audio_storage
+
 
 class Interview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -39,7 +41,10 @@ class InterviewAttempt(models.Model):
         on_delete=models.CASCADE,
         related_name="attempts",
     )
-    audio_file = models.FileField(upload_to="interview_records/")
+    audio_file = models.FileField(
+        upload_to="interview_records/",
+        storage=interview_audio_storage,
+    )
     transcript = models.TextField(blank=True, null=True)
     overall_score = models.IntegerField(default=0)
     metrics = models.JSONField(default=dict)

@@ -107,6 +107,34 @@ class InterviewAPITestCase(TestCase):
         self.assertEqual(response.data["status"], "PASSED")
         self.assertEqual(response.data["user_transcript"], "ვმუშაობ Django-ზე.")
 
+    def test_submit_audio_returns_400_on_cloudinary_rejection(self):
+        from cloudinary.exceptions import BadRequest as CloudinaryBadRequest
+
+        interview = Interview.objects.create(
+            user_id=self.user_id,
+            job_position="Backend Engineer",
+        )
+        question = InterviewQuestion.objects.create(
+            interview=interview,
+            question_text="აღწერეთ თქვენი ბოლო პროექტი.",
+        )
+
+        audio = BytesIO(b"fake-audio-bytes")
+        audio.name = "answer.webm"
+
+        with patch(
+            "interview_api.views.InterviewService.submit_audio",
+            side_effect=CloudinaryBadRequest("Invalid image file"),
+        ):
+            response = self.client.post(
+                f"/api/v1/interview/submit-audio/{question.id}/",
+                {"audio_file": audio},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Audio upload failed", response.data["detail"])
+
     def test_submit_audio_requires_auth(self):
         interview = Interview.objects.create(user_id="other-user", job_position="Role")
         question = InterviewQuestion.objects.create(

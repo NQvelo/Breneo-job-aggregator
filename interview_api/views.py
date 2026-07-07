@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from cloudinary.exceptions import BadRequest as CloudinaryBadRequest
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -108,6 +109,12 @@ class SubmitAudioView(InterviewBaseView):
         except InterviewAPIError as exc:
             logger.warning("Submit audio failed for question %s: %s", question_id, exc.message)
             return Response({"detail": exc.message}, status=exc.status_code)
+        except CloudinaryBadRequest as exc:
+            logger.exception("Cloudinary rejected audio upload for question %s", question_id)
+            return Response(
+                {"detail": f"Audio upload failed: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception:
             logger.exception("Unexpected error during audio submission for question %s", question_id)
             return Response(
