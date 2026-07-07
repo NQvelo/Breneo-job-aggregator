@@ -123,3 +123,39 @@ class InterviewAPITestCase(TestCase):
             format="multipart",
         )
         self.assertIn(response.status_code, (401, 403))
+
+    @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
+    def test_start_interview_via_bff_auth(self):
+        with patch(
+            "interview_api.services.interview_service.generate_interview_question",
+            return_value="კითხვა",
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"job_position": "DevOps Engineer", "user_id": self.user_id},
+                format="json",
+                HTTP_X_EMPLOYER_KEY="test-bff-secret",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            Interview.objects.filter(
+                user_id=self.user_id,
+                job_position="DevOps Engineer",
+            ).exists()
+        )
+
+    @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
+    def test_start_interview_via_bff_bearer_legacy(self):
+        with patch(
+            "interview_api.services.interview_service.generate_interview_question",
+            return_value="კითხვა",
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"job_position": "Backend Engineer", "user_id": self.user_id},
+                format="json",
+                HTTP_AUTHORIZATION="Bearer test-bff-secret",
+            )
+
+        self.assertEqual(response.status_code, 201)

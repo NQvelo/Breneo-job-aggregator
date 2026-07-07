@@ -12,6 +12,8 @@ from rest_framework.views import APIView
 
 from jobs.authentication.breneo_auth import BreneoJWTRequiredAuthentication
 
+from .authentication import InterviewBFFAuthentication
+
 from .auth import resolve_user_id
 from .exceptions import InterviewAPIError
 from .models import InterviewQuestion
@@ -27,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 class InterviewBaseView(APIView):
-    authentication_classes = [BreneoJWTRequiredAuthentication]
+    authentication_classes = [
+        InterviewBFFAuthentication,
+        BreneoJWTRequiredAuthentication,
+    ]
     permission_classes = [IsAuthenticated]
     service_class = InterviewService
 

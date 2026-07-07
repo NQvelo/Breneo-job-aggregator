@@ -1,138 +1,175 @@
-You are an expert Frontend UI/UX Developer working on the "Breneo" platform.
+You are an expert Frontend UI/UX Developer working on the "Breneo" platform (breneoapp — Vite + React SPA).
 Task: Build a beautiful, mobile-first, interactive HR Mock Interview interface with a live camera feed and a comprehensive AI evaluation dashboard.
 
 Tech Stack: React, TypeScript, Tailwind CSS, Lucide React (for icons).
 
-Integrate with the job-aggregator Django REST API under /api/v1/interview/ only.
-Base URL: https://<aggregator-host>/api/v1/interview/
+Follow the SAME auth / BFF pattern as employer jobs and job applications in breneoapp.
+Do NOT call the raw job-aggregator host from the browser for interview routes.
 
-AUTH
-- Both endpoints require: Authorization: Bearer <breneo-api JWT> (same token as other Breneo user flows).
-- The backend resolves the Breneo user id from the JWT and stores it as plain text (user_id) — do NOT send a Django user reference or numeric auth_user id.
-- Prefer calling the aggregator from Breneo-api server-side (BFF / Route Handlers / server actions) and forwarding Authorization: Bearer <token>. Never expose aggregator secrets in the browser.
-- 401: missing/invalid Bearer token.
-- 404 on submit: wrong question_id or question belongs to another user (scoped by user_id).
-- 400: validation errors (missing job_position, missing/invalid audio file).
-- 502: Whisper or LLM failure — show a friendly retry message in Georgian.
+-------------------------------------------------------------------------------
+AUTH — THREE LAYERS (match breneoapp; see src/api/interview/interviewApi.ts)
+-------------------------------------------------------------------------------
 
-API FLOW (two steps — implement in this order)
+LAYER 1 — BROWSER (React SPA)
+- User is logged into Breneo; TokenManager holds the Breneo access JWT.
+- Interview API calls use employerBffFetch() — NOT direct fetch to JOB_AGGREGATOR_BASE_URL.
+- Browser sends ONLY:
+    Authorization: Bearer <Breneo user JWT>
+    Accept: application/json
+- Browser NEVER sends EMPLOYER_POST_SECRET, JOB_AGGREGATOR_EMPLOYER_KEY, or X-Employer-Key.
+- Browser does NOT send user_id in the body for interview (BFF injects it server-side).
 
-1) START SESSION — generate question
-POST /api/v1/interview/start/
+LAYER 2 — BFF (same-origin; server/employer-jobs-proxy.mjs + server/interviewRoutes.mjs)
+- Dev: Vite proxies /api/v1/interview/* → localhost:8787 (employer-jobs-proxy).
+- Prod: production.mjs serves SPA + mounts the same BFF.
+- BFF validates Breneo JWT via requireUserAuth → GET MAIN_API_BASE_URL/api/profile/.
+- BFF resolves ctx.userId (Breneo user id string) from profile or JWT claims.
+- BFF forwards to job-aggregator with:
+    X-Employer-Key: <JOB_AGGREGATOR_EMPLOYER_KEY>   // same as employer job POST
+    user_id: <ctx.userId>   // injected by BFF — NOT from browser
+- Start: user_id in JSON body alongside job_position.
+- Submit: user_id as query param ?user_id=...
+- NEVER forward the user's Breneo JWT to the job-aggregator.
+
+BFF env (server-only — .env, not VITE_*):
+  JOB_AGGREGATOR_BASE_URL=https://breneo-job-aggregator.up.railway.app
+  JOB_AGGREGATOR_EMPLOYER_KEY=<same as aggregator EMPLOYER_POST_SECRET>
+  MAIN_API_BASE_URL=<Breneo API used at login — must match token issuer>
+
+LAYER 3 — JOB AGGREGATOR (Django interview_api)
+- Accepts BFF: X-Employer-Key (or X-Application-Key) + user_id in body/query.
+- Also accepts direct Breneo JWT (Postman/tests): Authorization: Bearer <jwt> or Bearer dev:<id> in DEBUG.
+- Stores user_id as plain text on Interview — no Django User FK.
+
+CLIENT BASE URL (browser)
+- Use getJobApplicationsApiBaseUrl() / same base as job applications BFF (NOT JOB_AGGREGATOR_BASE_URL).
+- Local dev: window.location.origin (Vite proxy → BFF).
+- Static hosts (dashboard.breneo.app): set VITE_EMPLOYER_JOBS_API_BASE_URL or VITE_EMPLOYER_BFF_URL.
+
+EXISTING CLIENT MODULE (reuse — do not reinvent)
+  src/api/interview/interviewApi.ts
+    startInterview(jobPosition)           → POST /api/v1/interview/start/
+    submitInterviewAudio(questionId, blob) → POST /api/v1/interview/submit-audio/{id}/
+  Both use employerBffFetch from src/api/employer/employerBffClient.ts.
+
+ERRORS
+- 401 browser: missing/expired Breneo JWT (TokenManager refresh).
+- 401 BFF: profile validation failed (JWT invalid/expired or MAIN_API_BASE_URL mismatch).
+- 403 after profile OK: JOB_AGGREGATOR_EMPLOYER_KEY ≠ aggregator EMPLOYER_POST_SECRET (BFF secret rejected upstream).
+- 404 submit: wrong question_id or interview owned by another user_id.
+
+DEBUG (Network tab — ignore Vite HMR)
+- `GET http://localhost:8080/` with `Accept: text/x-vite-ping` is NOT the interview API; it is Vite dev heartbeat.
+- The real call is `POST /api/v1/interview/start/` (or submit-audio) on the same origin (8080), proxied to employer-jobs-proxy :8787.
+- BFF validates JWT via GET MAIN_API_BASE_URL/api/profile/ — must match login host (see breneoapp .env MAIN_API_BASE_URL).
+- Run `npm run dev` in breneoapp (starts Vite + employer-jobs-proxy); interview routes 502/ECONNREFUSED if only `npm run dev:vite`.
+- 400: missing job_position, empty/invalid audio, file > 25 MB.
+- 502: Whisper/LLM failure — show Georgian retry message.
+
+-------------------------------------------------------------------------------
+API FLOW (BFF paths — what the React app calls)
+-------------------------------------------------------------------------------
+
+1) START SESSION
+POST {BFF_ORIGIN}/api/v1/interview/start/
+Authorization: Bearer <Breneo JWT>          // browser only
 Content-Type: application/json
-Body:
+Body (browser sends):
 {
-  "job_position": "Python Developer"   // required string, max 255 chars
+  "job_position": "Python Developer"
+}
+
+BFF upstream → POST {JOB_AGGREGATOR_BASE_URL}/api/v1/interview/start/
+Body (BFF adds user_id):
+{
+  "job_position": "Python Developer",
+  "user_id": "<breneo-user-id>"
 }
 
 Response 201:
 {
-  "interview": {
-    "id": "<uuid>",
-    "job_position": "Python Developer",
-    "created_at": "2026-07-07T16:00:00Z"
-  },
+  "interview": { "id": "<uuid>", "job_position": "...", "created_at": "..." },
   "question": {
-    "id": "<uuid>",                    // SAVE THIS — required for submit
+    "id": "<uuid>",              // SAVE — required for submit
     "interview_id": "<uuid>",
-    "job_position": "Python Developer",
-    "question_text": "<Georgian LLM question>"
+    "job_position": "...",
+    "question_text": "<Georgian>"
   }
 }
 
-2) SUBMIT RECORDING — transcribe + evaluate
-POST /api/v1/interview/submit-audio/<question_id>/
+2) SUBMIT RECORDING
+POST {BFF_ORIGIN}/api/v1/interview/submit-audio/<question_id>/
+Authorization: Bearer <Breneo JWT>
 Content-Type: multipart/form-data
-Form field: audio_file (preferred) OR audio
-- Upload the MediaRecorder Blob (video/webm or audio/webm).
-- Max file size: 25 MB.
-- Supported types: webm, mp3, mp4, wav, m4a, ogg (audio/* or video/* MIME).
+Form field: audio_file = MediaRecorder Blob (video/webm or audio/webm, max 25 MB)
 
-Response 200 (pass directly to InterviewReport):
+BFF upstream → POST .../submit-audio/<question_id>/?user_id=<breneo-user-id>
+(same multipart body; BFF does not expose user_id to browser)
+
+Response 200 → pass to InterviewReport:
 {
   "overall_score": 82,
-  "status": "PASSED",                  // "PASSED" | "FAILED" — threshold >= 75
-  "requires_retake": false,            // true when overall_score < 75
-  "user_transcript": "<Georgian transcript from Whisper>",
+  "status": "PASSED",
+  "requires_retake": false,
+  "user_transcript": "...",
   "metrics": {
-    "technical_accuracy": {
-      "score": 85,
-      "label": "ტექნიკური სიზუსტე",
-      "feedback": "<Georgian feedback>"
-    },
-    "structure_star": {
-      "score": 78,
-      "label": "პასუხის სტრუქტურა (STAR)",
-      "feedback": "<Georgian feedback>"
-    },
-    "delivery_confidence": {
-      "score": 80,
-      "label": "თვითპრეზენტაცია და ენა",
-      "feedback": "<Georgian feedback>"
-    }
+    "technical_accuracy": { "score": 85, "label": "ტექნიკური სიზუსტე", "feedback": "..." },
+    "structure_star": { "score": 78, "label": "პასუხის სტრუქტურა (STAR)", "feedback": "..." },
+    "delivery_confidence": { "score": 80, "label": "თვითპრეზენტაცია და ენა", "feedback": "..." }
   },
   "strengths": ["..."],
   "improvements": ["..."],
   "missing_concepts": ["..."],
-  "recommended_answer": "<Georgian ideal answer>"
+  "recommended_answer": "..."
 }
 
-TYPESCRIPT TYPES (snake_case — match JSON exactly)
-- StartInterviewRequest: { job_position: string }
-- StartInterviewResponse: { interview: Interview; question: InterviewQuestion }
-- Interview: { id: string; job_position: string; created_at: string }
-- InterviewQuestion: { id: string; interview_id: string; job_position: string; question_text: string }
-- InterviewEvaluation: response shape above (all fields required except missing_concepts may be [])
+TYPESCRIPT TYPES (snake_case — src/api/interview/types.ts)
+- StartInterviewResponse, InterviewEvaluation — match JSON above.
 
-SUGGESTED CLIENT MODULE
-- lib/interviewApi.ts (or server actions):
-  - startInterview(jobPosition: string, token: string): Promise<StartInterviewResponse>
-  - submitInterviewAudio(questionId: string, blob: Blob, token: string): Promise<InterviewEvaluation>
-- Build FormData: formData.append("audio_file", blob, "answer.webm")
-
+-------------------------------------------------------------------------------
 ARCHITECTURE — two main components
+-------------------------------------------------------------------------------
 
-1. InterviewContainer.tsx (recorder + API orchestration)
-- Props: jobPosition: string (from parent route or a text input before start), authToken or a server action wrapper.
-- On mount / "Start Mock Interview":
-  1. Call POST /start/ with { job_position }.
-  2. Store question.id and question.question_text in state.
-  3. Display the Georgian question_text prominently above the video widget.
-- Implement browser hardware handling using navigator.mediaDevices.getUserMedia({ video: true, audio: true }).
-- Render a live HTML <video> stream (muted, playsInline, autoPlay) centered on screen — rounded corners, subtle shadow, professional interview widget look.
-- Use MediaRecorder on the stream; on stop, produce a Blob (prefer video/webm; fallback audio/webm).
-- UI states:
-  - setup: Text input for job_position (if not passed via props) + "Start Mock Interview" + camera/mic permission reminder in Georgian.
-  - idle: Question displayed + "Start Recording" (after permissions granted).
-  - recording: Flashing red "REC", 2-minute countdown (auto-stop at 0), CSS audio wave visualizer, "Stop & Submit".
-  - submitting: Disable controls; spinner/skeleton + "AI-ის მიერ პასუხის გაანალიზება...".
-  - results: Render <InterviewReport evaluation={...} onRetake={...} />.
-- On "Stop & Submit": POST multipart to /submit-audio/{question.id}/ with the Blob; transition to results on 200.
-- If requires_retake is true, show a prominent "თავიდან ცდა" button that calls POST /start/ again (new question) or re-records for the same question if product allows only one attempt per question — default: start a new session via /start/.
-- Handle permission denied (NotAllowedError), no devices (NotFoundError), and 502/400 API errors with clear Georgian messages.
+1. InterviewContainer.tsx (src/components/interviews/InterviewContainer.tsx)
+- Import interviewApi from src/api/interview/interviewApi.ts — no raw aggregator URLs.
+- On "Start Mock Interview": await interviewApi.startInterview(jobPosition).
+- Store question.id + question.question_text.
+- getUserMedia({ video: true, audio: true }) → <video> preview (rounded, shadow).
+- MediaRecorder → Blob on stop.
+- States: setup | idle | recording | submitting | results.
+- submitting: "AI-ის მიერ პასუხის გაანალიზება..."
+- On submit: await interviewApi.submitInterviewAudio(question.id, blob).
+- requires_retake → "თავიდან ცდა" → new startInterview() (new session).
+- Handle NotAllowedError / NotFoundError / InterviewApiError with Georgian copy.
 
-2. InterviewReport.tsx (evaluation dashboard)
-Props: evaluation: InterviewEvaluation, onRetake?: () => void
+2. InterviewReport.tsx
+- Props: evaluation: InterviewEvaluation, onRetake?: () => void
+- Circular SVG score; green PASSED / red FAILED (threshold 75).
+- Three metric bars with Georgian labels from API.
+- 2-col grid: strengths (green ✓) | improvements + missing_concepts (orange).
+- Accordion: user_transcript.
+- Card: "HR-ის რეკომენდაცია" → recommended_answer.
 
-- Header Summary: SVG/Tailwind circular progress for overall_score (0–100). Green when status === "PASSED", amber/red when "FAILED". Show status badge and requires_retake callout when true.
-- Metrics Breakdown: Map metrics.technical_accuracy, metrics.structure_star, metrics.delivery_confidence — horizontal bars with metric.label and score/100. Accordion or expandable row for metric.feedback on click/hover.
-- Strengths vs Improvements: grid grid-cols-1 md:grid-cols-2
-  - Left: strengths — soft green, checkmarks (✓).
-  - Right: improvements + missing_concepts — soft orange/red, warning bullets. Label missing_concepts separately if non-empty.
-- Transcript Accordion: collapsible user_transcript.
-- HR Recommended Answer: blockquote/card with subtle gradient, title "HR-ის რეკომენდაცია", body recommended_answer.
+PAGE: src/pages/user/InterviewsPage.tsx — route /interviews in AppRoutes.tsx.
 
-UX / RESPONSIVE
-- Mobile-first; video container max-width on desktop (e.g. max-w-lg mx-auto).
-- Smooth CSS transitions between states.
-- Stop MediaStream tracks on unmount and after submit.
-- Do not block UI on camera preview while waiting for /start/ — show loading on question fetch only.
+-------------------------------------------------------------------------------
+COMPARE TO OTHER AGGREGATOR FEATURES IN BRENEOAPP
+-------------------------------------------------------------------------------
 
-EXAMPLE PAGE FLOW
-1) User enters target role (job_position) → Start Mock Interview.
-2) API returns Georgian question → user reads question → Start Recording.
-3) User answers in Georgian (spoken) → Stop & Submit.
-4) Show InterviewReport with evaluation JSON.
-5) If requires_retake, offer retry (new /start/ recommended).
+| Feature            | Browser auth      | BFF → aggregator secret     | User id injection      |
+|--------------------|-------------------|-----------------------------|------------------------|
+| Employer jobs      | Breneo JWT        | X-Employer-Key              | external_user_id query |
+| Job applications   | Breneo JWT        | X-Application-Key           | BFF body (apply)       |
+| Mock interview     | Breneo JWT        | X-Employer-Key              | user_id body/query     |
 
-Use snake_case in types and API payloads. Keep fetch/axios with Bearer token in server actions or BFF routes when possible; if calling from client, use the user's session token only — never employer or application secrets.
+Never mix patterns: interview uses the same X-Employer-Key as employer jobs, not Authorization: Bearer for the secret.
+
+-------------------------------------------------------------------------------
+POSTMAN (aggregator only — debugging backend, not frontend flow)
+-------------------------------------------------------------------------------
+POST https://<aggregator>/api/v1/interview/start/
+Header: X-Employer-Key: <EMPLOYER_POST_SECRET>
+Body: { "job_position": "...", "user_id": "test-user-1" }
+OR Authorization: Bearer dev:test-user-1        // DEBUG only (no user_id)
+
+Use snake_case. See docs/frontend-dual-base-url-prompt.txt for two-base-URL rules.
