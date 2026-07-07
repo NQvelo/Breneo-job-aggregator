@@ -20,6 +20,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('jobs.urls')),
     path('api/v1/', include('jobs.urls_v1')),
+    path('api/v1/interview/', include('interview_api.urls')),
     # OpenAPI Schema and Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

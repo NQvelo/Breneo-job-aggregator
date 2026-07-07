@@ -1,0 +1,125 @@
+"""API tests for mock interview endpoints."""
+
+from __future__ import annotations
+
+from io import BytesIO
+from unittest.mock import patch
+
+from django.test import TestCase
+from rest_framework.test import APIClient
+
+from jobs.authentication.breneo_auth import BreneoUser
+from interview_api.models import Interview, InterviewQuestion
+from interview_api.schemas.evaluation import InterviewEvaluationResult
+
+
+class InterviewAPITestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_id = "test-user-1"
+        self.breneo_user = BreneoUser(id=self.user_id)
+        self.client.force_authenticate(user=self.breneo_user)
+
+    def test_start_interview_creates_records(self):
+        with patch(
+            "interview_api.services.interview_service.generate_interview_question",
+            return_value="როგორ მუშაობთ Django-ზე?",
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"job_position": "Python Developer"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data["question"]["question_text"],
+            "როგორ მუშაობთ Django-ზე?",
+        )
+        self.assertTrue(
+            Interview.objects.filter(
+                user_id=self.user_id,
+                job_position="Python Developer",
+            ).exists()
+        )
+
+    def test_submit_audio_returns_evaluation(self):
+        interview = Interview.objects.create(
+            user_id=self.user_id,
+            job_position="Backend Engineer",
+        )
+        question = InterviewQuestion.objects.create(
+            interview=interview,
+            question_text="აღწერეთ თქვენი ბოლო პროექტი.",
+        )
+
+        evaluation = InterviewEvaluationResult.model_validate(
+            {
+                "overall_score": 82,
+                "status": "PASSED",
+                "requires_retake": False,
+                "user_transcript": "ვმუშაობ Django-ზე.",
+                "metrics": {
+                    "technical_accuracy": {
+                        "score": 85,
+                        "label": "ტექნიკური სიზუსტე",
+                        "feedback": "კარგი.",
+                    },
+                    "structure_star": {
+                        "score": 78,
+                        "label": "პასუხის სტრუქტურა (STAR)",
+                        "feedback": "საშუალო.",
+                    },
+                    "delivery_confidence": {
+                        "score": 80,
+                        "label": "თვითპრეზენტაცია და ენა",
+                        "feedback": "კარგი.",
+                    },
+                },
+                "strengths": ["ტექნიკური ბაზა"],
+                "improvements": ["მაგალითები"],
+                "missing_concepts": [],
+                "recommended_answer": "იდეალური პასუხი.",
+            }
+        )
+
+        audio = BytesIO(b"fake-audio-bytes")
+        audio.name = "answer.webm"
+
+        with (
+            patch(
+                "interview_api.services.interview_service.transcribe_audio",
+                return_value="ვმუშაობ Django-ზე.",
+            ),
+            patch(
+                "interview_api.services.interview_service.evaluate_interview_answer",
+                return_value=evaluation,
+            ),
+        ):
+            response = self.client.post(
+                f"/api/v1/interview/submit-audio/{question.id}/",
+                {"audio_file": audio},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["overall_score"], 82)
+        self.assertEqual(response.data["status"], "PASSED")
+        self.assertEqual(response.data["user_transcript"], "ვმუშაობ Django-ზე.")
+
+    def test_submit_audio_requires_auth(self):
+        interview = Interview.objects.create(user_id="other-user", job_position="Role")
+        question = InterviewQuestion.objects.create(
+            interview=interview,
+            question_text="Q?",
+        )
+        audio = BytesIO(b"x")
+        audio.name = "a.webm"
+
+        unauthenticated = APIClient()
+        response = unauthenticated.post(
+            f"/api/v1/interview/submit-audio/{question.id}/",
+            {"audio_file": audio},
+            format="multipart",
+        )
+        self.assertIn(response.status_code, (401, 403))

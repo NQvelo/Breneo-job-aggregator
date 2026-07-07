@@ -68,6 +68,7 @@ INSTALLED_APPS = [
 
     # Your apps
     'jobs',
+    'interview_api',
     'corsheaders',   # 👈 REQUIRED
 
 ]
@@ -319,3 +320,7 @@ SPECTACULAR_SETTINGS = {
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBHFY3nND2LGiqUgI3GxGCNFRh24gXCR8E").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
 GEMINI_TIMEOUT_SECONDS = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "90") or "90")
+
+# Mock interview simulator (Whisper + LLM). Keys are server-side only.
+INTERVIEW_LLM_PROVIDER = os.environ.get("INTERVIEW_LLM_PROVIDER", "groq").strip().lower()
+INTERVIEW_WHISPER_PROVIDER = os.environ.get("INTERVIEW_WHISPER_PROVIDER", "groq").strip().lower()
