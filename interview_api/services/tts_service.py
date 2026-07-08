@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_GEORGIAN_VOICE = "ka-GE-EkaNeural"
 DEFAULT_TTS_PROVIDER = "edge"
 
+# ElevenLabs Georgian support: only the v3 model covers Georgian (70+ languages).
+# multilingual_v2 / turbo / flash do NOT support Georgian and produce gibberish.
+DEFAULT_ELEVENLABS_MODEL = "eleven_v3"
+GEORGIAN_CAPABLE_ELEVENLABS_MODELS = {"eleven_v3"}
+
 
 def _georgian_voice() -> str:
     return os.environ.get("INTERVIEW_TTS_VOICE", DEFAULT_GEORGIAN_VOICE).strip() or DEFAULT_GEORGIAN_VOICE
@@ -67,8 +72,16 @@ async def _synthesize_async(text: str, voice: str) -> bytes:
 
 def _synthesize_elevenlabs(text: str) -> bytes:
     api_key, voice_id = _elevenlabs_settings()
-    model_id = os.environ.get("INTERVIEW_TTS_ELEVENLABS_MODEL", "eleven_multilingual_v2").strip()
+    model_id = os.environ.get("INTERVIEW_TTS_ELEVENLABS_MODEL", DEFAULT_ELEVENLABS_MODEL).strip()
     timeout = int(os.environ.get("INTERVIEW_TTS_TIMEOUT_SECONDS", "60") or "60")
+
+    if model_id not in GEORGIAN_CAPABLE_ELEVENLABS_MODELS:
+        logger.warning(
+            "ElevenLabs model '%s' does not support Georgian; audio may be unintelligible. "
+            "Use one of: %s",
+            model_id,
+            ", ".join(sorted(GEORGIAN_CAPABLE_ELEVENLABS_MODELS)),
+        )
 
     payload = {
         "text": text.strip(),
@@ -80,6 +93,12 @@ def _synthesize_elevenlabs(text: str) -> bytes:
             "use_speaker_boost": os.environ.get("INTERVIEW_TTS_SPEAKER_BOOST", "true").lower() == "true",
         },
     }
+
+    # language_code is only accepted by turbo/flash models; sending it to v3 errors out.
+    # v3 auto-detects Georgian from the script. Opt in explicitly only if needed.
+    language_code = os.environ.get("INTERVIEW_TTS_LANGUAGE_CODE", "").strip()
+    if language_code:
+        payload["language_code"] = language_code
     headers = {
         "xi-api-key": api_key,
         "Accept": "audio/mpeg",
