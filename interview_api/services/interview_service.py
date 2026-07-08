@@ -13,6 +13,7 @@ from interview_api.schemas.evaluation import InterviewEvaluationResult
 from interview_api.services.job_context import InterviewJobContext
 from interview_api.services.llm_service import evaluate_interview_answer, generate_interview_question
 from interview_api.services.tts_service import synthesize_question_audio
+from interview_api.services.welcome_service import build_welcome_text
 from interview_api.services.whisper_service import transcribe_audio
 
 
@@ -57,6 +58,17 @@ class InterviewService:
         question.save()
         return question
 
+    def _attach_welcome(self, interview: Interview) -> None:
+        context = self._job_context(interview)
+        welcome_text = build_welcome_text(context)
+        interview.welcome_text = welcome_text
+        interview.welcome_audio.save(
+            f"interview_{interview.id}_welcome.mp3",
+            synthesize_question_audio(welcome_text),
+            save=False,
+        )
+        interview.save(update_fields=["welcome_text", "welcome_audio"])
+
     @transaction.atomic
     def start_interview(
         self,
@@ -70,6 +82,7 @@ class InterviewService:
             job=job,
             job_position=job_position.strip(),
         )
+        self._attach_welcome(interview)
         question = self._create_question(
             interview=interview,
             order=1,

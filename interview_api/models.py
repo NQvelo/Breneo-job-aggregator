@@ -16,6 +16,12 @@ class Interview(models.Model):
         blank=True,
     )
     job_position = models.CharField(max_length=255)
+    welcome_text = models.TextField(blank=True, default="")
+    welcome_audio = models.FileField(
+        upload_to="interview_welcome/",
+        storage=interview_audio_storage,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

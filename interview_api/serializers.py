@@ -81,7 +81,22 @@ class InterviewSerializer(serializers.ModelSerializer):
 
 class StartInterviewResponseSerializer(serializers.Serializer):
     interview = InterviewSerializer()
+    welcome_text = serializers.SerializerMethodField()
+    welcome_audio_url = serializers.SerializerMethodField()
     question = InterviewQuestionSerializer()
+
+    def get_welcome_text(self, obj) -> str:
+        return obj["interview"].welcome_text or ""
+
+    def get_welcome_audio_url(self, obj) -> str | None:
+        interview = obj["interview"]
+        if not interview.welcome_audio:
+            return None
+        request = self.context.get("request")
+        url = interview.welcome_audio.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class SubmitAudioSerializer(serializers.Serializer):

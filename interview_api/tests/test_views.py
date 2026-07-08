@@ -51,6 +51,9 @@ class InterviewAPITestCase(TestCase):
         self.assertEqual(response.data["question"]["question_number"], 1)
         self.assertEqual(response.data["question"]["total_questions"], MAX_INTERVIEW_QUESTIONS)
         self.assertTrue(response.data["question"]["question_audio_url"])
+        self.assertTrue(response.data["welcome_text"])
+        self.assertIn("გამარჯობა", response.data["welcome_text"])
+        self.assertTrue(response.data["welcome_audio_url"])
         self.assertTrue(
             Interview.objects.filter(
                 user_id=self.user_id,
