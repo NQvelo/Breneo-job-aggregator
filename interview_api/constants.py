@@ -1,3 +1,3 @@
 """Interview session configuration."""
 
-MAX_INTERVIEW_QUESTIONS = 10
+MAX_INTERVIEW_QUESTIONS = 3

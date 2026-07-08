@@ -7,19 +7,36 @@ from rest_framework import serializers
 
 from interview_api.constants import MAX_INTERVIEW_QUESTIONS
 from interview_api.models import Interview, InterviewAttempt, InterviewQuestion
+from jobs.models import Job
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".webm", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".ogg", ".oga"}
 
 
 class StartInterviewSerializer(serializers.Serializer):
-    job_position = serializers.CharField(max_length=255, trim_whitespace=True)
+    job_position = serializers.CharField(max_length=255, trim_whitespace=True, required=False, allow_blank=True)
+    job_id = serializers.IntegerField(required=False, min_value=1)
 
-    def validate_job_position(self, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise serializers.ValidationError("job_position is required.")
-        return cleaned
+    def validate(self, attrs):
+        job_id = attrs.get("job_id")
+        job_position = (attrs.get("job_position") or "").strip()
+
+        if job_id is not None:
+            try:
+                job = Job.objects.select_related("company").get(pk=job_id, is_active=True)
+            except Job.DoesNotExist as exc:
+                raise serializers.ValidationError({"job_id": "Job not found or inactive."}) from exc
+            attrs["job"] = job
+            attrs["job_position"] = job.title.strip()
+            return attrs
+
+        if not job_position:
+            raise serializers.ValidationError(
+                {"job_position": "job_position or job_id is required."}
+            )
+        attrs["job_position"] = job_position
+        attrs["job"] = None
+        return attrs
 
 
 class InterviewQuestionSerializer(serializers.ModelSerializer):
@@ -55,9 +72,11 @@ class InterviewQuestionSerializer(serializers.ModelSerializer):
 
 
 class InterviewSerializer(serializers.ModelSerializer):
+    job_id = serializers.IntegerField(source="job.id", read_only=True, allow_null=True)
+
     class Meta:
         model = Interview
-        fields = ("id", "job_position", "created_at")
+        fields = ("id", "job_id", "job_position", "created_at")
 
 
 class StartInterviewResponseSerializer(serializers.Serializer):

@@ -11,10 +11,11 @@ class InterviewQuestionInline(admin.TabularInline):
 
 @admin.register(Interview)
 class InterviewAdmin(admin.ModelAdmin):
-    list_display = ("id", "user_id", "job_position", "created_at")
+    list_display = ("id", "user_id", "job", "job_position", "created_at")
     list_filter = ("created_at",)
     search_fields = ("job_position", "user_id")
     readonly_fields = ("id", "created_at")
+    raw_id_fields = ("job",)
     inlines = [InterviewQuestionInline]
 
 

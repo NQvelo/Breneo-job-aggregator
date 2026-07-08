@@ -250,6 +250,42 @@ class InterviewAPITestCase(TestCase):
         )
         self.assertIn(response.status_code, (401, 403))
 
+    def test_start_interview_with_job_id_uses_job_context(self):
+        from jobs.models import Company, Job
+
+        company = Company.objects.create(name="Breneo Tech")
+        job = Job.objects.create(
+            title="Senior Python Developer",
+            company=company,
+            platform="test",
+            external_job_id="py-1",
+            skills_required=["Python", "Django"],
+            qualifications="5+ years Python experience.",
+        )
+
+        with (
+            patch(
+                "interview_api.services.interview_service.generate_interview_question",
+                return_value="როგორ მუშაობთ Django-ზე?",
+            ) as mock_generate,
+            patch(
+                "interview_api.services.interview_service.synthesize_question_audio",
+                side_effect=_mock_tts,
+            ),
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"job_id": job.id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["interview"]["job_id"], job.id)
+        self.assertEqual(response.data["interview"]["job_position"], "Senior Python Developer")
+        job_context = mock_generate.call_args.args[0]
+        self.assertEqual(job_context.job_position, "Senior Python Developer")
+        self.assertIn("Python", job_context.skills_required)
+
     @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
     def test_start_interview_via_bff_auth(self):
         with (

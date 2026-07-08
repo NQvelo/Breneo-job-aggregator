@@ -8,6 +8,13 @@ from interview_api.storage import interview_audio_storage
 class Interview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.CharField(max_length=255, db_index=True)
+    job = models.ForeignKey(
+        "jobs.Job",
+        on_delete=models.SET_NULL,
+        related_name="interviews",
+        null=True,
+        blank=True,
+    )
     job_position = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 

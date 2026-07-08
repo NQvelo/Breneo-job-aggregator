@@ -62,6 +62,7 @@ class StartInterviewView(InterviewBaseView):
             interview, question = self.get_service().start_interview(
                 user_id=user_id,
                 job_position=serializer.validated_data["job_position"],
+                job=serializer.validated_data.get("job"),
             )
         except InterviewAPIError as exc:
             logger.warning("Start interview failed: %s", exc.message)

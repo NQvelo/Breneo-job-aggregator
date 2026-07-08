@@ -12,18 +12,31 @@ from django.conf import settings
 
 from interview_api.exceptions import LLMResponseParseError, LLMServiceError
 from interview_api.schemas.evaluation import InterviewEvaluationResult
+from interview_api.services.job_context import InterviewJobContext, format_job_context_for_llm
 
 logger = logging.getLogger(__name__)
 
-QUESTION_SYSTEM_PROMPT = """You are an expert HR Technical Recruiter for the Breneo EdTech platform.
-Generate exactly ONE highly relevant, role-specific behavioral or technical interview question.
+QUESTION_SYSTEM_PROMPT = """You are a Lead Tech Recruiter at a modern Georgian technology company.
+Your job is to generate ONE highly customized interview question based on the job position and context provided by the user.
 
-Rules:
-- The question must be in Georgian.
-- Tailor difficulty and topic to the provided job_position.
+CRITICAL LANGUAGE RULES FOR GEORGIAN:
+1. Avoid literal/mechanical translations. Do NOT translate technical terms like Backend, Frontend, UI/UX, API, Endpoint, State Management, Figma, Components, WebSockets into awkward Georgian words. Keep them in their natural professional transliteration (ბექენდი, ფრონტენდი, API-ები, ენდპოინტები, ფიგმა და ა.შ.).
+2. Use a professional, natural corporate Georgian tone (თავაზიანი, მაგრამ თანამედროვე ტონი — გამოიყენე "თქვენ").
+3. Ensure absolute grammatical correctness in Georgian. The sentence must flow smoothly as if written by a native Georgian HR expert.
+
+JOB CUSTOMIZATION RULES:
+- The question must NOT be general (e.g., do NOT ask "რა არის თქვენი ძლიერი მხარეები?").
+- The question MUST target a realistic, role-specific technical scenario or situational challenge (e.g., state management problem for Frontend, database bottleneck for Backend, user testing challenge for UI/UX).
+- Tailor difficulty and topic to the job posting context below (title, skills, qualifications, responsibilities).
+- When skills_required or tech_stack are provided, at least one question in the session should probe them; for this question_number pick an appropriate focus.
+- Match seniority level when provided (junior vs senior depth).
+
+SESSION RULES:
 - This is question {question_number} of {total_questions} in a single interview session.
-- Vary topics across the session (technical depth, behavioral STAR, problem-solving, teamwork, etc.).
+- Vary topics across the session (technical depth, situational/behavioral, problem-solving, teamwork, etc.).
 - Do NOT repeat or closely paraphrase any question listed in previous_questions.
+
+OUTPUT:
 - Return ONLY raw JSON: {{"question_text": "<Georgian question>"}}
 - No markdown, no extra keys."""
 
@@ -123,10 +136,10 @@ def _chat_completion(system_prompt: str, user_prompt: str) -> str:
 
 
 def generate_interview_question(
-    job_position: str,
+    job_context: InterviewJobContext,
     *,
     question_number: int = 1,
-    total_questions: int = 10,
+    total_questions: int = 3,
     previous_questions: list[str] | None = None,
 ) -> str:
     previous = previous_questions or []
@@ -136,7 +149,7 @@ def generate_interview_question(
         total_questions=total_questions,
     )
     user_prompt = (
-        f"job_position: {job_position.strip()}\n"
+        f"{format_job_context_for_llm(job_context)}\n"
         f"question_number: {question_number}\n"
         f"total_questions: {total_questions}\n"
         f"previous_questions:\n{previous_block}"
