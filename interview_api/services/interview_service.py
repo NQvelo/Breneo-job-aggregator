@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from django.db import transaction
 
 from interview_api.constants import MAX_INTERVIEW_QUESTIONS
-from interview_api.exceptions import InterviewAPIError
+from interview_api.exceptions import InterviewAPIError, TTSServiceError
 from interview_api.models import Interview, InterviewAttempt, InterviewQuestion
 from interview_api.schemas.evaluation import InterviewEvaluationResult
 from interview_api.services.job_context import InterviewJobContext
@@ -59,6 +59,9 @@ class InterviewService:
         return question
 
     def _attach_welcome(self, interview: Interview) -> None:
+        if interview.job_id:
+            interview = Interview.objects.select_related("job", "job__company").get(pk=interview.pk)
+
         context = self._job_context(interview)
         welcome_text = build_welcome_text(context)
         interview.welcome_text = welcome_text
@@ -68,6 +71,9 @@ class InterviewService:
             save=False,
         )
         interview.save(update_fields=["welcome_text", "welcome_audio"])
+
+        if not interview.welcome_audio.name:
+            raise TTSServiceError("Welcome audio could not be saved.")
 
     @transaction.atomic
     def start_interview(
@@ -88,6 +94,7 @@ class InterviewService:
             order=1,
             previous_questions=[],
         )
+        interview = Interview.objects.select_related("job", "job__company").get(pk=interview.pk)
         return interview, question
 
     @transaction.atomic

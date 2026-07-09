@@ -13,6 +13,15 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".webm", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".ogg", ".oga"}
 
 
+def _absolute_file_url(file_field, request) -> str | None:
+    if not file_field or not getattr(file_field, "name", ""):
+        return None
+    url = file_field.url
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
 class StartInterviewSerializer(serializers.Serializer):
     job_position = serializers.CharField(max_length=255, trim_whitespace=True, required=False, allow_blank=True)
     job_id = serializers.IntegerField(required=False, min_value=1)
@@ -62,13 +71,7 @@ class InterviewQuestionSerializer(serializers.ModelSerializer):
         return MAX_INTERVIEW_QUESTIONS
 
     def get_question_audio_url(self, obj) -> str | None:
-        if not obj.question_audio:
-            return None
-        request = self.context.get("request")
-        url = obj.question_audio.url
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+        return _absolute_file_url(obj.question_audio, self.context.get("request"))
 
 
 class InterviewSerializer(serializers.ModelSerializer):
@@ -79,24 +82,42 @@ class InterviewSerializer(serializers.ModelSerializer):
         fields = ("id", "job_id", "job_position", "created_at")
 
 
+class InterviewPlaybackItemSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=["welcome", "question"])
+    text = serializers.CharField()
+    audio_url = serializers.CharField(allow_null=True)
+
+
 class StartInterviewResponseSerializer(serializers.Serializer):
     interview = InterviewSerializer()
     welcome_text = serializers.SerializerMethodField()
     welcome_audio_url = serializers.SerializerMethodField()
+    playback = serializers.SerializerMethodField()
     question = InterviewQuestionSerializer()
 
     def get_welcome_text(self, obj) -> str:
         return obj["interview"].welcome_text or ""
 
     def get_welcome_audio_url(self, obj) -> str | None:
-        interview = obj["interview"]
-        if not interview.welcome_audio:
-            return None
+        return _absolute_file_url(obj["interview"].welcome_audio, self.context.get("request"))
+
+    def get_playback(self, obj) -> list[dict]:
         request = self.context.get("request")
-        url = interview.welcome_audio.url
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+        interview = obj["interview"]
+        question = obj["question"]
+        items = [
+            {
+                "type": "welcome",
+                "text": interview.welcome_text or "",
+                "audio_url": _absolute_file_url(interview.welcome_audio, request),
+            },
+            {
+                "type": "question",
+                "text": question.question_text,
+                "audio_url": _absolute_file_url(question.question_audio, request),
+            },
+        ]
+        return InterviewPlaybackItemSerializer(items, many=True).data
 
 
 class SubmitAudioSerializer(serializers.Serializer):

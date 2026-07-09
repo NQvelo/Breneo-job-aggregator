@@ -206,3 +206,337 @@ OR Authorization: Bearer dev:test-user-1        // DEBUG only (no user_id)
 Aggregator also needs GROQ_API_KEY for 201 on start (question generation).
 
 Use snake_case. See docs/frontend-dual-base-url-prompt.txt for two-base-URL rules.
+
+-------------------------------------------------------------------------------
+UPDATE — PLAYBACK / WELCOME / MULTI-QUESTION (REQUIRED — READ IF WELCOME NOT PLAYING)
+-------------------------------------------------------------------------------
+
+The backend now returns a Georgian welcome + 3-question session. If welcome audio
+does not play, the frontend is almost certainly skipping it. DO NOT play only
+question.question_audio_url on start — use playback[] in order.
+
+BFF: NO CHANGES. Pass through start/submit JSON as-is.
+
+-------------------------------------------------------------------------------
+START SESSION — UPDATED RESPONSE 201
+-------------------------------------------------------------------------------
+
+Body (browser) — prefer job_id from job detail page:
+{ "job_id": 12345 }
+OR legacy: { "job_position": "Python Developer" }
+
+Response 201:
+{
+  "interview": {
+    "id": "<uuid>",
+    "job_id": 12345,
+    "job_position": "Senior Python Developer",
+    "created_at": "..."
+  },
+  "welcome_text": "გამარჯობა! მოგესალმებით ...",
+  "welcome_audio_url": "https://.../interview_welcome/....mp3",
+  "playback": [
+    {
+      "type": "welcome",
+      "text": "გამარჯობა! მოგესალმებით ...",
+      "audio_url": "https://.../interview_welcome/....mp3"
+    },
+    {
+      "type": "question",
+      "text": "<Georgian question 1>",
+      "audio_url": "https://.../interview_questions/....mp3"
+    }
+  ],
+  "question": {
+    "id": "<uuid>",
+    "interview_id": "<uuid>",
+    "job_position": "...",
+    "question_text": "<Georgian>",
+    "question_number": 1,
+    "total_questions": 3,
+    "question_audio_url": "https://..."
+  }
+}
+
+CRITICAL: On start, play playback[0] (welcome) THEN playback[1] (question 1).
+Only after both finish → enable recording.
+
+-------------------------------------------------------------------------------
+SUBMIT — UPDATED RESPONSE 200
+-------------------------------------------------------------------------------
+
+Same evaluation fields as before, PLUS:
+{
+  "overall_score": 82,
+  "status": "PASSED",
+  "requires_retake": false,
+  "user_transcript": "...",
+  "metrics": { ... },
+  "strengths": ["..."],
+  "improvements": ["..."],
+  "missing_concepts": ["..."],
+  "recommended_answer": "...",
+  "question_number": 1,
+  "total_questions": 3,
+  "interview_complete": false,
+  "next_question": {
+    "id": "<uuid>",
+    "question_text": "...",
+    "question_number": 2,
+    "total_questions": 3,
+    "question_audio_url": "https://..."
+  }
+}
+
+After Q3: interview_complete=true, next_question=null → show final report.
+
+-------------------------------------------------------------------------------
+TYPESCRIPT — src/api/interview/types.ts
+-------------------------------------------------------------------------------
+
+export interface InterviewPlaybackItem {
+  type: "welcome" | "question";
+  text: string;
+  audio_url: string | null;
+}
+
+export interface InterviewQuestion {
+  id: string;
+  interview_id: string;
+  job_position: string;
+  question_text: string;
+  question_number: number;
+  total_questions: number;
+  question_audio_url: string | null;
+}
+
+export interface StartInterviewResponse {
+  interview: {
+    id: string;
+    job_id: number | null;
+    job_position: string;
+    created_at: string;
+  };
+  welcome_text: string;
+  welcome_audio_url: string | null;
+  playback: InterviewPlaybackItem[];
+  question: InterviewQuestion;
+}
+
+export interface SubmitInterviewResponse {
+  overall_score: number;
+  status: "PASSED" | "FAILED";
+  requires_retake: boolean;
+  user_transcript: string;
+  metrics: Record<string, { score: number; label: string; feedback: string }>;
+  strengths: string[];
+  improvements: string[];
+  missing_concepts: string[];
+  recommended_answer: string;
+  question_number: number;
+  total_questions: number;
+  interview_complete: boolean;
+  next_question: InterviewQuestion | null;
+}
+
+-------------------------------------------------------------------------------
+AUDIO PLAYBACK HELPER — src/utils/playAudioSequence.ts (CREATE)
+-------------------------------------------------------------------------------
+
+/** Play MP3 URLs in order; resolves when each segment ends. */
+export function playAudioUrl(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(url);
+    audio.onended = () => resolve();
+    audio.onerror = () => reject(new Error(`Audio failed: ${url}`));
+    const playPromise = audio.play();
+    if (playPromise) {
+      playPromise.catch(reject); // autoplay blocked → show manual play button
+    }
+  });
+}
+
+export async function playPlaybackSequence(
+  items: InterviewPlaybackItem[],
+): Promise<void> {
+  for (const item of items) {
+    if (!item.audio_url) continue;
+    await playAudioUrl(item.audio_url);
+  }
+}
+
+-------------------------------------------------------------------------------
+InterviewContainer.tsx — REQUIRED FLOW CHANGE
+-------------------------------------------------------------------------------
+
+STATES:
+  setup | playing_audio | ready_to_record | recording | submitting
+  | question_feedback | session_complete
+
+ON START (after startInterview returns):
+  1. Save response.question as currentQuestion
+  2. setState("playing_audio")
+  3. await playPlaybackSequence(response.playback)
+     // plays welcome THEN question 1 automatically
+  4. setState("ready_to_record") — show "პასუხის ჩაწერა" button
+
+ON SUBMIT (after submitInterviewAudio):
+  1. Show brief per-question feedback
+  2. If response.interview_complete → session_complete + full report
+  3. Else if response.next_question:
+       currentQuestion = next_question
+       setState("playing_audio")
+       await playAudioUrl(next_question.question_audio_url)  // no welcome on Q2/Q3
+       setState("ready_to_record")
+
+AUTOPLAY BLOCKED (Safari/iOS):
+  If audio.play() rejects NotAllowedError, show button:
+    "▶ ინტერვიუს დაწყება" → user tap → playPlaybackSequence(playback)
+
+CAPTIONS WHILE PLAYING:
+  Show current segment text (welcome_text or question_text) as subtitle.
+
+PROGRESS:
+  Label: "კითხვა {question_number} / {total_questions}" (3 total)
+
+DO NOT:
+  - Skip playback[0] on start
+  - Call startInterview() again between questions
+  - Show only question_text without playing audio
+
+FROM JOB PAGE:
+  startInterview({ job_id: job.id }) — NOT free-text job_position only
+
+-------------------------------------------------------------------------------
+ACCEPTANCE CHECKLIST
+-------------------------------------------------------------------------------
+
+[ ] Network tab: start response has playback[0].type === "welcome" with audio_url
+[ ] Welcome audio plays before question 1 on every new session
+[ ] Q2/Q3 play next_question.question_audio_url after submit (no second welcome)
+[ ] Progress shows 1/3, 2/3, 3/3
+[ ] Final report only when interview_complete === true
+[ ] Autoplay-blocked browsers show manual play button
+[ ] job_id passed when starting from job detail page
+
+-------------------------------------------------------------------------------
+COPY-PASTE PROMPT — BRENEOAPP: PLAY WELCOME PITCH ON INTERVIEW START
+-------------------------------------------------------------------------------
+
+You are working on breneoapp (Vite + React + TypeScript). The job-aggregator
+backend already returns a Georgian welcome message with spoken audio when an
+interview starts. Your task: make the frontend PLAY the welcome pitch before
+question 1 — like a real HR interviewer opening the session.
+
+-------------------------------------------------------------------------------
+PROBLEM
+-------------------------------------------------------------------------------
+If the user hears question 1 immediately with no greeting, the frontend is
+wrong. It is skipping welcome audio and playing only question.question_audio_url.
+
+-------------------------------------------------------------------------------
+BACKEND RESPONSE (already working — no BFF changes)
+-------------------------------------------------------------------------------
+POST /api/v1/interview/start/ returns:
+
+{
+  "welcome_text": "გამარჯობა! მოგესალმებით ...",
+  "welcome_audio_url": "https://.../interview_welcome/....mp3",
+  "playback": [
+    { "type": "welcome",  "text": "...", "audio_url": "https://.../welcome.mp3" },
+    { "type": "question", "text": "...", "audio_url": "https://.../question.mp3" }
+  ],
+  "question": { "id": "...", "question_audio_url": "https://...", ... }
+}
+
+Use playback[] — it is the source of truth for play order on start.
+
+-------------------------------------------------------------------------------
+REQUIRED UX FLOW
+-------------------------------------------------------------------------------
+
+1. User clicks "დაიწყე ინტერვიუ" → call startInterview({ job_id })
+2. State → playing_welcome (or playing_audio)
+3. Show Georgian subtitle from playback[0].text (or welcome_text)
+4. Show label: "ინტერვიუერი გიხსნით..." while welcome plays
+5. Play playback[0].audio_url (welcome MP3) — WAIT until audio ends
+6. Transition label: "კითხვა 1 / 3"
+7. Show subtitle from playback[1].text
+8. Play playback[1].audio_url (question 1 MP3) — WAIT until audio ends
+9. State → ready_to_record — show "პასუხის ჩაწერა" button
+10. User records answer → submit → for Q2/Q3 play ONLY next_question.question_audio_url
+    (no welcome again)
+
+-------------------------------------------------------------------------------
+IMPLEMENTATION
+-------------------------------------------------------------------------------
+
+// src/utils/playAudioSequence.ts
+export function playAudioUrl(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(url);
+    audio.onended = () => resolve();
+    audio.onerror = () => reject(new Error(`Audio failed: ${url}`));
+    audio.play()?.catch(reject);
+  });
+}
+
+export async function playPlaybackSequence(
+  items: { type: string; audio_url: string | null }[],
+): Promise<void> {
+  for (const item of items) {
+    if (!item.audio_url) continue;
+    await playAudioUrl(item.audio_url);
+  }
+}
+
+// InterviewContainer.tsx — on start
+const response = await interviewApi.startInterview({ job_id: job.id });
+setCurrentQuestion(response.question);
+setPhase("playing_audio");
+setCaption(response.playback[0]?.text ?? response.welcome_text);
+setStatusLabel("ინტერვიუერი გიხსნით...");
+
+try {
+  await playPlaybackSequence(response.playback);
+} catch (err) {
+  if (err?.name === "NotAllowedError") {
+  // Safari/iOS blocked autoplay — show manual button:
+  // "▶ ინტერვიუს დაწყება" → onClick → playPlaybackSequence(response.playback)
+  }
+  throw err;
+}
+
+setPhase("ready_to_record");
+setStatusLabel("კითხვა 1 / 3");
+
+-------------------------------------------------------------------------------
+UI COPY (Georgian)
+-------------------------------------------------------------------------------
+- While welcome plays:     "ინტერვიუერი გიხსნით..."
+- Autoplay blocked button: "▶ ინტერვიუს დაწყება"
+- Ready to record:         "პასუხის ჩაწერა"
+- While recording:         "ჩაწერა მიმდინარეობს..."
+- Submitting:              "AI-ის მიერ პასუხის გაანალიზება..."
+
+Show welcome_text / playback[].text as captions (muted subtitle below video).
+
+-------------------------------------------------------------------------------
+DO NOT
+-------------------------------------------------------------------------------
+- Play question.question_audio_url immediately on start (skips welcome)
+- Play welcome again on Q2 or Q3 (welcome is start-only)
+- Call startInterview() again between questions
+- Ignore playback[] if welcome_audio_url is also present — prefer playback[]
+
+-------------------------------------------------------------------------------
+VERIFY (Network tab)
+-------------------------------------------------------------------------------
+[ ] POST /api/v1/interview/start/ → playback[0].type === "welcome"
+[ ] playback[0].audio_url is https://... (not null)
+[ ] User hears welcome speech BEFORE question 1
+[ ] Captions show welcome_text during welcome audio
+[ ] Recording button disabled until BOTH welcome + Q1 audio finish
+
+BFF/auth unchanged. Use employerBffFetch + Breneo JWT only.
+
