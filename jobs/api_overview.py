@@ -227,18 +227,6 @@ API_GROUPS = [
         ],
     },
     {
-        "id": "cron",
-        "title": "Operations",
-        "auth": "public",
-        "endpoints": [
-            {
-                "methods": ["GET", "POST"],
-                "path": "/api/trigger-fetch",
-                "description": "Run fetch_jobs command (optional FETCH_SECRET).",
-            },
-        ],
-    },
-    {
         "id": "employer",
         "title": "Employer APIs",
         "auth": "employer",

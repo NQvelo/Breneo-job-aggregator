@@ -93,7 +93,7 @@ class JobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, Dynamic
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
             'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications',
-            'salary', 'apply_url', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active',
+            'salary', 'apply_url', 'apply_email', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active',
             'supports_in_app_apply', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
@@ -278,7 +278,7 @@ class NestedJobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, D
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
             'description', 'description_short', 'responsibilities', 'qualifications',
-            'salary', 'apply_url', 'platform', 'external_job_id',
+            'salary', 'apply_url', 'apply_email', 'platform', 'external_job_id',
             'posted_at', 'fetched_at', 'is_active', 'supports_in_app_apply', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
@@ -583,6 +583,7 @@ def job_to_dict(job):
             "responsibilities": job.responsibilities,
             "qualifications": job.qualifications,
             "apply_url": job.apply_url,
+            "apply_email": getattr(job, "apply_email", None),
             "platform": job.platform,
             "external_job_id": job.external_job_id,
             "posted_at": job.posted_at.isoformat() if job.posted_at else None,
@@ -608,6 +609,7 @@ def job_to_dict(job):
             "responsibilities": job.get("responsibilities"),
             "qualifications": job.get("qualifications"),
             "apply_url": job.get("apply_url"),
+            "apply_email": job.get("apply_email"),
             "platform": job.get("platform"),
             "external_job_id": job.get("external_job_id"),
             "posted_at": job.get("posted_at"),
@@ -641,6 +643,7 @@ class JobApplicationJobSummarySerializer(
             "seniority",
             "salary",
             "apply_url",
+            "apply_email",
             "platform",
             "posted_at",
             "is_active",

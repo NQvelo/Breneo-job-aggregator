@@ -1,5 +1,6 @@
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
+from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings as django_settings
@@ -12,6 +13,7 @@ from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
 from jobs.remote_worldwide_filter import is_remote_worldwide_listing
 import logging
+import re
 import sys
 
 logger = logging.getLogger(__name__)
@@ -30,35 +32,85 @@ def get_logo_url(company_name: str, size=101) -> str:
     safe_name = company_name.replace(" ", "")
     return f"https://img.logo.dev/name/{safe_name}?token={LOGO_DEV_PUBLIC_KEY}&size={size}&retina=true"
 
-# Example companies
+
+# Non–jobs.ge feeds: keep tech roles only (skip pure sales / ops / legal, etc.).
+_TECH_ROLE_TITLE = re.compile(
+    r"(?i)\b("
+    r"engineer|engineering|developer|software|programmer|devops|sre|"
+    r"backend|front[\s\-]?end|full[\s\-]?stack|fullstack|"
+    r"data\s+(?:engineer|scientist|analyst)|machine\s+learning|ml\s+engineer|ai\s+engineer|"
+    r"qa|quality\s+assurance|test\s+engineer|automation|"
+    r"security\s+engineer|appsec|infosec|cyber|"
+    r"platform|cloud|infrastructure|sysadmin|system\s+admin|"
+    r"mobile|ios|android|react\s+native|flutter|"
+    r"designer|ui/?ux|product\s+designer|product\s+manager|technical\s+program|"
+    r"architect|cto|tech\s+lead|engineering\s+manager|"
+    r"analyst|scientist|research\s+engineer"
+    r")\b"
+)
+_NON_TECH_TITLE = re.compile(
+    r"(?i)\b("
+    r"account\s+executive|sales\s+(?:manager|director|rep|associate)|"
+    r"recruiter|talent\s+acquisition|customer\s+success|"
+    r"account\s+manager|marketing\s+manager|brand\s+manager|"
+    r"legal\s+counsel|attorney|paralegal|receptionist|"
+    r"office\s+manager|executive\s+assistant(?!\s+to\s+cto)|"
+    r"copywriter|content\s+writer|social\s+media\s+manager"
+    r")\b"
+)
+
+
+def _is_tech_role_listing(job_dict: dict) -> bool:
+    """Heuristic title filter for ATS boards (not used for jobs.ge IT category)."""
+    title = (job_dict.get("title") or "").strip()
+    if not title:
+        return False
+    if _NON_TECH_TITLE.search(title):
+        return False
+    if _TECH_ROLE_TITLE.search(title):
+        return True
+    # Remotive / boards sometimes use stack names in the title
+    desc_head = (job_dict.get("description") or "")[:800].lower()
+    if any(
+        tok in title.lower() or tok in desc_head
+        for tok in (
+            "python", "javascript", "typescript", "golang", "rust", "java",
+            "kubernetes", "react", "node.js", "aws", "gcp", "azure",
+        )
+    ):
+        return True
+    return False
+
+
+# Example companies — ATS boards. Non–jobs.ge saves require true worldwide remote + tech roles.
 COMPANIES = [
+    # jobs.ge IT/Programming: local GE tech (no worldwide filter)
+    {
+        "name": "Jobs.ge IT",
+        "platform": "jobs.ge",
+        "url": "https://jobs.ge/?cid=6",
+        "dynamic_company": True,
+    },
+    # Greenhouse Job Board API
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom"},
     {"name": "Figma", "platform": "greenhouse", "handle": "figma"},
-    {"name": "Spotify", "platform": "lever", "handle": "spotify"},
     {"name": "Stripe", "platform": "greenhouse", "handle": "stripe"},
-    {"name": "Airbnb", "platform": "greenhouse", "handle": "airbnb"},
-    {"name": "DoorDash", "platform": "greenhouse", "handle": "doordash"},
-    {"name": "SpaceX", "platform": "greenhouse", "handle": "spacex"},
     {"name": "Cloudflare", "platform": "greenhouse", "handle": "cloudflare"},
-    {"name": "Xometry", "platform": "greenhouse", "handle": "xometry"},
     {"name": "Reddit", "platform": "greenhouse", "handle": "reddit"},
-    # SmartRecruiters public API: identifier = path segment on jobs.smartrecruiters.com/{Identifier}/...
-    # remote_only=True → API locationType=REMOTE (still filter further with --remote-worldwide-only if needed)
-    {"name": "Visa", "platform": "smartrecruiters", "handle": "Visa", "remote_only": True},
-    # {"name": "OtherCo", "platform": "smartrecruiters", "handle": "CompanyIdentifier", "remote_only": True},
-    # Remotive: remote-only board (see https://remotive.com/api-documentation — use their URLs; throttle fetches)
+    {"name": "Xometry", "platform": "greenhouse", "handle": "xometry"},
+    # Lever Postings API
+    {"name": "Spotify", "platform": "lever", "handle": "spotify"},
+    # Ashby public job board GraphQL
+    {"name": "Notion", "platform": "ashby", "handle": "notion"},
+    {"name": "Ramp", "platform": "ashby", "handle": "ramp"},
+    {"name": "Linear", "platform": "ashby", "handle": "linear"},
+    # Remotive: remote board (still filtered to worldwide + tech)
     {
         "name": "Remotive",
         "platform": "remotive",
         "url": "https://remotive.com/api/remote-jobs",
         "dynamic_company": True,
     },
-    # Adzuna aggregated search (set ADZUNA_APP_ID, ADZUNA_APP_KEY, optional ADZUNA_COUNTRY=us|gb|...)
-    # {"name": "Adzuna", "platform": "adzuna", "handle": "remote developer", "dynamic_company": True},
-    # Note: Apple removed - they use a custom ATS system with no public API or RSS feed
-    # Note: Google and Meta removed due to ToS concerns - they don't provide official APIs
-    # LinkedIn: no public API. To use a third-party API, set LINKEDIN_JOBS_API_URL (and optional KEY) and add:
-    # {"name": "LinkedIn Jobs", "platform": "linkedin", "url": "<your API URL>"}
 ]
 
 def _compute_industry_tags(job_obj, raw_job_dict, created, logger_instance):
@@ -114,6 +166,9 @@ PLATFORM_TO_FETCHER = {
     "linkedin": fetchers.fetch_linkedin,
 }
 
+# Fetched jobs missing from their feed for this long are deleted. Employer jobs are never touched.
+STALE_JOB_GRACE_DAYS = 7
+
 class Command(BaseCommand):
     help = "Fetch jobs from configured companies and store/update in DB"
 
@@ -133,7 +188,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--remote-worldwide-only",
             action="store_true",
-            help="Only save listings that look like remote + worldwide (skip hybrid/onsite and region-locked remote).",
+            help=(
+                "Deprecated/no-op for most platforms: non–jobs.ge sources always require "
+                "remote + worldwide. jobs.ge (local GE tech) is never filtered this way."
+            ),
         )
 
     def handle(self, *args, **options):
@@ -154,8 +212,12 @@ class Command(BaseCommand):
                     self.style.WARNING(f"  Purged all jobs ({deleted} row(s) removed including related objects).")
                 )
                 logger.info("Purged all jobs before fetch (%s rows)", deleted)
+            self.stdout.write(
+                "  Filter: non–jobs.ge → remote+worldwide + tech roles; "
+                "jobs.ge → all IT/Programming with sufficient detail"
+            )
             if remote_worldwide_only:
-                self.stdout.write("  Remote + worldwide filter: ON")
+                self.stdout.write("  (--remote-worldwide-only noted; already enforced for non–jobs.ge)")
             logger.info("Starting job fetch command")
             
         except Exception as e:
@@ -164,6 +226,7 @@ class Command(BaseCommand):
             logger.error(error_msg)
             sys.exit(1)
         
+        run_started_at = timezone.now()
         total = 0
         errors = []
         stop_fetching = False
@@ -229,6 +292,13 @@ class Command(BaseCommand):
                     api_url = comp.get("url") or getattr(django_settings, "LINKEDIN_JOBS_API_URL", None)
                     api_key = comp.get("api_key") or getattr(django_settings, "LINKEDIN_JOBS_API_KEY", None)
                     jobs_data = fetcher(api_url, company_name, api_key=api_key) if api_url else []
+                elif platform == "jobs.ge":
+                    jobs_data = fetcher(
+                        comp.get("url") or "https://jobs.ge/?cid=6",
+                        company_name,
+                        logo=company_logo,
+                        limit=comp.get("limit"),
+                    )
                 else:
                     jobs_data = fetcher(comp.get("url") or comp.get("handle"), company_name)
             except Exception as e:
@@ -255,14 +325,27 @@ class Command(BaseCommand):
                     if not ext_id:
                         continue
 
-                    if remote_worldwide_only and not is_remote_worldwide_listing(j):
-                        continue
+                    # jobs.ge: keep local GE tech listings (no worldwide filter).
+                    # All other platforms: remote+worldwide AND tech-role titles only.
+                    if platform != "jobs.ge":
+                        if not is_remote_worldwide_listing(j):
+                            continue
+                        if not _is_tech_role_listing(j):
+                            continue
 
                     # Parse posted_at only when fetcher provided it; avoid overwriting with None
                     raw_posted = j.get("posted_at")
                     parsed_posted = parse_date(raw_posted) if raw_posted else None
                     raw_location = j.get("location")
                     ploc, pcountry = parse_stored_location_fields(raw_location)
+                    # Fetcher may supply an explicit country (jobs.ge → Georgia)
+                    explicit_country = (j.get("location_country") or "").strip() or None
+                    if explicit_country:
+                        pcountry = explicit_country
+                    # jobs.ge already returns a clean city name (or None)
+                    if platform == "jobs.ge":
+                        ploc = (raw_location or "").strip() or None
+                        pcountry = pcountry or "Georgia"
 
                     job_company_obj = company_obj
                     if comp.get("dynamic_company"):
@@ -277,9 +360,17 @@ class Command(BaseCommand):
                             },
                         )
 
-                    raw_apply = (j.get("apply_url") or ext_id or "").strip()
+                    raw_apply = (j.get("apply_url") or "").strip()
+                    # For most platforms the listing URL doubles as apply_url; for jobs.ge
+                    # we only store a real registration link (or leave empty when email-only).
+                    if not raw_apply and platform != "jobs.ge":
+                        raw_apply = (ext_id or "").strip()
                     if len(raw_apply) > 2048:
                         raw_apply = raw_apply[:2048]
+
+                    raw_apply_email = (j.get("apply_email") or "").strip() or None
+                    if raw_apply_email and len(raw_apply_email) > 254:
+                        raw_apply_email = raw_apply_email[:254]
 
                     defaults = {
                         "title": j.get("title") or "",
@@ -287,8 +378,10 @@ class Command(BaseCommand):
                         "location": ploc if ploc is not None else raw_location,
                         "description": j.get("description"),
                         "apply_url": raw_apply or None,
+                        "apply_email": raw_apply_email,
                         "raw": j.get("raw") or {},
                         "is_active": True,
+                        "last_seen_at": run_started_at,
                     }
                     if pcountry is not None:
                         defaults["location_country"] = pcountry
@@ -435,12 +528,27 @@ class Command(BaseCommand):
                             job_obj.save(update_fields=["industry_tags"])
 
                     if (
-                        remote_worldwide_only
+                        platform != "jobs.ge"
                         and norm_applied
                         and job_obj.work_mode in ("hybrid", "onsite")
                     ):
                         job_obj.delete()
                         continue
+
+                    # Final guard: remote + country-specific must never stay in the table.
+                    if platform != "jobs.ge":
+                        check = {
+                            "title": job_obj.title or "",
+                            "location": job_obj.location or j.get("location") or "",
+                            "location_country": job_obj.location_country or "",
+                            "description": job_obj.description or j.get("description") or "",
+                            "workplace_type": job_obj.workplace_type or j.get("workplace_type"),
+                            "raw": job_obj.raw if isinstance(job_obj.raw, dict) else (j.get("raw") or {}),
+                            "applicant_location_requirements": j.get("applicant_location_requirements"),
+                        }
+                        if not is_remote_worldwide_listing(check):
+                            job_obj.delete()
+                            continue
 
                     found_ids.add(ext_id)
                     total += 1
@@ -461,18 +569,22 @@ class Command(BaseCommand):
                     logger.exception(error_msg)
                     errors.append(error_msg)
 
-            # Mark old jobs inactive (only if we processed the full feed for this company;
-            # skip when --max-jobs stopped mid-company to avoid wrong inactive flags)
+            # Hide jobs no longer in this feed (only if we processed the full feed for this company;
+            # skip when --max-jobs stopped mid-company to avoid wrong inactive flags).
+            # The feed was non-empty, so an empty found_ids means nothing passed the filters.
             try:
                 if company_complete:
                     if comp.get("dynamic_company"):
                         qs = Job.objects.filter(platform=platform)
                     else:
                         qs = Job.objects.filter(platform=platform, company=company_obj)
-                    if found_ids:
-                        inactive_count = qs.exclude(external_job_id__in=found_ids).update(is_active=False)
-                        if inactive_count > 0:
-                            self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
+                    inactive_count = (
+                        qs.filter(is_active=True)
+                        .exclude(external_job_id__in=found_ids)
+                        .update(is_active=False)
+                    )
+                    if inactive_count > 0:
+                        self.stdout.write(f"  ⊘ Marked {inactive_count} old jobs as inactive")
             except Exception as e:
                 error_msg = f"Failed to mark inactive jobs for {company_name} ({platform}): {str(e)}"
                 logger.exception(error_msg)
@@ -480,12 +592,20 @@ class Command(BaseCommand):
 
             self.stdout.write(self.style.SUCCESS(f"  ✓ Fetched {company_job_count} jobs for {company_name}"))
 
-        # Delete inactive jobs from the dataset (no longer in feeds)
+        # Delete fetched jobs that have been missing from their feed for the whole grace period.
+        # Covers removed companies and sources that keep failing; employer jobs are excluded.
         try:
-            deleted_count, _ = Job.objects.filter(is_active=False).delete()
+            stale_cutoff = run_started_at - timedelta(days=STALE_JOB_GRACE_DAYS)
+            stale_qs = Job.objects.filter(platform__in=PLATFORM_TO_FETCHER.keys()).filter(
+                Q(last_seen_at__lt=stale_cutoff)
+                | Q(last_seen_at__isnull=True, fetched_at__lt=stale_cutoff)
+            )
+            deleted_count, _ = stale_qs.delete()
             if deleted_count > 0:
-                self.stdout.write(self.style.WARNING(f"  🗑 Deleted {deleted_count} inactive job(s) from the dataset"))
-                logger.info("Deleted %d inactive jobs from the dataset", deleted_count)
+                self.stdout.write(self.style.WARNING(
+                    f"  🗑 Deleted {deleted_count} row(s) for jobs unseen for {STALE_JOB_GRACE_DAYS}+ days"
+                ))
+                logger.info("Deleted %d rows for jobs unseen for %d+ days", deleted_count, STALE_JOB_GRACE_DAYS)
         except Exception as e:
             logger.exception("Failed to delete inactive jobs: %s", e)
             self.stdout.write(self.style.WARNING(f"  ⚠ Could not delete inactive jobs: {e}"))
@@ -516,11 +636,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"✓ Successfully fetched/updated {total} jobs"))
             logger.info("Job fetch completed successfully. Total jobs: %d", total)
         else:
-            self.stdout.write(self.style.WARNING("⚠ No new jobs were fetched"))
             logger.warning("Job fetch completed but no jobs were found/updated")
-        
-        # Django management commands should not return values from handle()
-        # All output is already written to self.stdout above
-        # Exit code is automatically 0 (success) unless an exception occurs
+            raise CommandError("No jobs were fetched from any source")
 
 

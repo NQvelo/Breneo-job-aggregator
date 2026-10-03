@@ -475,6 +475,13 @@ class Job(models.Model):
     
     apply_url = models.URLField(max_length=2048, blank=True, null=True)
 
+    # Contact email for applying when the posting has no registration URL
+    apply_email = models.EmailField(
+        blank=True,
+        null=True,
+        help_text="Email to send applications to when no apply_url is provided",
+    )
+
     # Compensation as free text (ranges, hourly, equity, etc.)
     salary = models.CharField(
         max_length=500,
@@ -495,6 +502,11 @@ class Job(models.Model):
 
     posted_at = models.DateTimeField(blank=True, null=True, db_index=True)
     fetched_at = models.DateTimeField(auto_now=True)
+    last_seen_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Last time fetch_jobs saw this job in its source feed (null for employer jobs)",
+    )
     is_active = models.BooleanField(default=True)
 
     # Raw API payload for debugging / enrichment

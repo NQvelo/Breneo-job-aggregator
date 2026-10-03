@@ -49,8 +49,6 @@ OpenAPI: `/api/schema/` · Swagger: `/api/docs/` · ReDoc: `/api/redoc/`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET, POST | `/api/trigger-fetch` | Runs `fetch_jobs` management command. Optional `secret` query/body if `FETCH_SECRET` is set. |
-
 ---
 
 ## Job applications

@@ -167,6 +167,8 @@ _RESPONSIBILITY_KEYWORDS = frozenset([
     "თქვენი როლი",
     "ძირითადი ამოცან",  # main tasks / duties
     "სამუშაო ამოცან",
+    "მოვალეობ",  # responsibilities / duties (ძირითადი მოვალეობები)
+    "პასუხისმგებლობ",  # responsibilities
 ])
 
 _QUALIFICATION_KEYWORDS = frozenset([

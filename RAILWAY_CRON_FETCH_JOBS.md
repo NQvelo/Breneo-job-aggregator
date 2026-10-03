@@ -1,45 +1,52 @@
-# Railway: Cron for job data updates (`fetch_jobs`)
+# Railway: Daily cron for job data updates (`fetch_jobs`)
 
-Use a **separate Cron service** so job data updates run on a schedule. Your **web service** keeps its normal start command.
+Fetched jobs (jobs.ge, Greenhouse, Lever, Ashby, Remotive) are refreshed **once a day** by a
+**separate Railway Cron service**. Employer-posted jobs (`platform="employer"`) are created
+instantly through the API and are never modified or deleted by `fetch_jobs`.
+
+There is no HTTP trigger endpoint; the cron service runs the management command directly.
 
 ---
 
 ## 1. Web service (no change)
 
-Keep your existing Django service as is:
-
-- **Start command:** `gunicorn job_aggregator.wsgi --log-file -`  
-  (or leave blank if Railway uses the Procfile: `web: gunicorn job_aggregator.wsgi --log-file -`)
-
+Keep the existing Django service as is (start command from `railway.toml` / `Procfile`).
 Do **not** use the cron command as the web service start command.
 
 ---
 
-## 2. Add a Cron service for `fetch_jobs`
+## 2. Cron service for `fetch_jobs`
 
-1. In your Railway project, click **Add Service** (or **New** → **Empty Service**).
-2. Connect this service to the **same GitHub repo** (Breneo-job-aggregator).
-3. **Settings** for this new service:
-   - **Build:** Same as your Django service (same repo, Nixpacks will use `requirements.txt`).
-   - **Start command:**  
+1. In the Railway project, click **New** → **Empty Service** (or duplicate the web service).
+2. Connect it to the **same GitHub repo** (Breneo-job-aggregator), same branch.
+3. **Settings** for this service:
+   - **Custom Start Command:**
      ```bash
-     python manage.py fetch_jobs
+     python manage.py migrate --noinput && python manage.py fetch_jobs
      ```
-   - **Cron Schedule:** Set a [crontab expression](https://docs.railway.com/guides/cron-jobs#crontab-expressions) (UTC). Examples:
-     - Every 6 hours: `0 */6 * * *`
-     - Every day at 00:00 UTC: `0 0 * * *`
-     - Every day at 08:00 UTC: `0 8 * * *`
-     - Minimum interval between runs: 5 minutes (e.g. every hour: `0 * * * *`).
-4. **Variables:** Reuse the same env as your Django app (e.g. **Link** the Postgres service so this service gets `DATABASE_URL`). Add the same vars your Django service has if the command needs them (e.g. `DJANGO_SECRET_KEY` is not required for `fetch_jobs`; `DATABASE_URL` is).
-5. Save. Railway will run `python manage.py fetch_jobs` on the schedule. The process must **exit** when done (this command does), so the next run can start on time.
+   - **Cron Schedule:** `0 20 * * *` — every day at 20:00 UTC = **00:00 Georgia time (UTC+4)**.
+   - **Restart Policy:** `Never` (a cron run must exit; it must not be restarted in a loop).
+4. **Variables:** reference the same variables as the web service — at minimum `DATABASE_URL`
+   (link the Postgres service). Add any keys the fetchers use (e.g. `GEMINI_API_KEY` if set on web).
+5. Deploy. Then open the service → **Deployments** and check the logs of the next run.
+
+If a run is still active when the next one is due, Railway skips the new run.
 
 ---
 
-## 3. Summary
+## 3. What a run does
 
-| Service        | Start command                              | Cron schedule (example) |
-|----------------|--------------------------------------------|--------------------------|
-| Django (web)   | `gunicorn job_aggregator.wsgi --log-file -`| —                        |
-| Cron (fetch)   | `python manage.py fetch_jobs`              | e.g. `0 */6 * * *` (every 6 h) |
+1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`).
+2. Upserts each job by `(platform, external_job_id)`, sets `is_active=True` and `last_seen_at=now`.
+3. For each source that returned data, jobs missing from today's feed are marked `is_active=False`
+   (hidden from the API). If a source fails or returns nothing, its jobs are left untouched.
+4. Fetched jobs not seen for **7 days** (`STALE_JOB_GRACE_DAYS`) are deleted.
+5. Exits with a non-zero code if no jobs were fetched at all, so the run shows as failed in Railway.
 
-Cron runs are in **UTC**. If a run is still “Active” when the next run is due, the new run is skipped until the previous one finishes.
+---
+
+## 4. Checking that it runs
+
+- Railway: Cron service → **Deployments** shows one run per day with logs.
+- Data: `GET /api/search?sort=newest` — `fetched_at` of fetched jobs should be from the last 24 h.
+- Manual run (e.g. Railway shell): `python manage.py fetch_jobs`

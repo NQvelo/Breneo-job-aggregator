@@ -259,36 +259,6 @@ paths:
       responses:
         '200':
           description: No response body
-  /api/trigger-fetch:
-    get:
-      operationId: trigger_fetch_retrieve
-      description: Allow GET requests for easy cron job calling
-      tags:
-      - trigger-fetch
-      security:
-      - cookieAuth: []
-      - basicAuth: []
-      - {}
-      responses:
-        '200':
-          description: No response body
-    post:
-      operationId: trigger_fetch_create
-      description: |-
-        Trigger endpoint to manually fetch jobs.
-        Can be called by external cron services or webhooks.
-
-        Query parameters:
-        - secret: Secret token for authentication (optional, set FETCH_SECRET env var)
-      tags:
-      - trigger-fetch
-      security:
-      - cookieAuth: []
-      - basicAuth: []
-      - {}
-      responses:
-        '200':
-          description: No response body
   /api/v1/jobs/:
     get:
       operationId: v1_jobs_list
