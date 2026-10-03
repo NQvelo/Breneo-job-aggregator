@@ -1,0 +1,10 @@
+# Config-as-code for the daily fetch_jobs Cron service (see RAILWAY_CRON_FETCH_JOBS.md).
+# Set this file as the cron service's "Config-as-code path" so railway.toml (web/Gunicorn) is not used.
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "sh -c 'python manage.py migrate --noinput && python manage.py fetch_jobs'"
+cronSchedule = "0 20 * * *"
+restartPolicyType = "never"

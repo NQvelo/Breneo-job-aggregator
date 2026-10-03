@@ -20,6 +20,8 @@ Do **not** use the cron command as the web service start command.
 1. In the Railway project, click **New** → **Empty Service** (or duplicate the web service).
 2. Connect it to the **same GitHub repo** (Breneo-job-aggregator), same branch.
 3. **Settings** for this service:
+   - **Config-as-code path:** `railway.cron.toml` (otherwise `railway.toml` forces the Gunicorn start
+     command and the cron run never exits). That file already sets the values below.
    - **Custom Start Command:**
      ```bash
      python manage.py migrate --noinput && python manage.py fetch_jobs
