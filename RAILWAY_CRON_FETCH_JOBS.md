@@ -10,7 +10,8 @@ There is no HTTP trigger endpoint; the cron service runs the management command 
 
 ## 1. Web service (no change)
 
-Keep the existing Django service as is (start command from `railway.toml` / `Procfile`).
+There is no `railway.toml`; all Railway settings are managed in the dashboard.
+The web service uses the `Procfile` unless a Custom Start Command is set in its settings.
 Do **not** use the cron command as the web service start command.
 
 ---
@@ -20,9 +21,8 @@ Do **not** use the cron command as the web service start command.
 1. In the Railway project, click **New** → **Empty Service** (or duplicate the web service).
 2. Connect it to the **same GitHub repo** (Breneo-job-aggregator), same branch.
 3. **Settings** for this service:
-   - **Config-as-code path:** `railway.cron.toml` (otherwise `railway.toml` forces the Gunicorn start
-     command and the cron run never exits). That file already sets the values below.
-   - **Custom Start Command:**
+   - **Config-as-code path:** leave empty.
+   - **Custom Start Command** (required — without it the `Procfile` starts Gunicorn and the run never exits):
      ```bash
      python manage.py migrate --noinput && python manage.py fetch_jobs
      ```
