@@ -6,5 +6,5 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "sh -c 'python manage.py migrate --noinput && python manage.py fetch_jobs'"
-cronSchedule = "0 20 * * *"
+cronSchedule = "30 20 * * *"
 restartPolicyType = "never"

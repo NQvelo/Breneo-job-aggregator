@@ -26,7 +26,7 @@ Do **not** use the cron command as the web service start command.
      ```bash
      python manage.py migrate --noinput && python manage.py fetch_jobs
      ```
-   - **Cron Schedule:** `0 20 * * *` — every day at 20:00 UTC = **00:00 Georgia time (UTC+4)**.
+   - **Cron Schedule:** `30 20 * * *` — every day at 20:30 UTC = **00:30 Georgia time (UTC+4)**.
    - **Restart Policy:** `Never` (a cron run must exit; it must not be restarted in a loop).
 4. **Variables:** reference the same variables as the web service — at minimum `DATABASE_URL`
    (link the Postgres service). Add any keys the fetchers use (e.g. `GEMINI_API_KEY` if set on web).
