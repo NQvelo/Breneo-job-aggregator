@@ -9,6 +9,7 @@ from datetime import timedelta
 import html
 import json
 import re
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -123,7 +124,7 @@ def fetch_lever(handle, company_name, logo=None):
     url = f"https://api.lever.co/v0/postings/{handle}?mode=json"
     jobs = []
     try:
-        r = safe_get(url)
+        r = safe_get(url, timeout=30)
         data = r.json()
         for job in data:
             job_id = job.get("id") or job.get("uuid") or job.get("postingId")
@@ -138,7 +139,7 @@ def fetch_lever(handle, company_name, logo=None):
                 "apply_url": hosted_url,
                 "posted_at": parse_date(job.get("postDate") or job.get("datePosted")),
                 "platform": "lever",
-                "workplace_type": (job.get("categories") or {}).get("commitment"),
+                "workplace_type": job.get("workplaceType"),
                 "external_job_id": str(job_id),
                 "raw": job,
                 "logo": logo,
@@ -148,30 +149,269 @@ def fetch_lever(handle, company_name, logo=None):
     return jobs
 
 
-def fetch_workable(company_slug, company_name, logo=None):
+def _workable_location_text(job: dict) -> str:
+    locs = job.get("locations") or ([job["location"]] if job.get("location") else [])
+    parts = []
+    for loc in locs:
+        if not isinstance(loc, dict) or loc.get("hidden"):
+            continue
+        text = ", ".join(filter(None, [loc.get("city"), loc.get("region"), loc.get("country")]))
+        if text and text not in parts:
+            parts.append(text)
+    text = " / ".join(parts)
+    if job.get("remote") or (job.get("workplace") or "").lower() == "remote":
+        text = f"Remote · {text}" if text else "Remote"
+    return text
+
+
+def fetch_workable(company_slug, company_name, logo=None, *, remote_only=True):
+    """
+    Workable public careers API (apply.workable.com/{slug}).
+
+    remote_only: skip onsite/hybrid postings before fetching details.
+    """
     logo = logo or get_logo_url(company_name)
+    base = "https://apply.workable.com/api"
+    list_url = f"{base}/v3/accounts/{company_slug}/jobs"
     jobs = []
     try:
-        rss_url = f"https://{company_slug}.workable.com/jobs.rss"
-        r = safe_get(rss_url)
-        soup = BeautifulSoup(r.content, "xml")
-        for item in soup.find_all("item"):
-            link = item.link.text if item.link else None
-            desc = (item.description.text if item.description else "")
+        payload: dict = {"query": "", "location": [], "department": [], "worktype": [], "remote": []}
+        postings: list = []
+        while True:
+            r = httpx.post(list_url, json=payload, headers=HEADERS, timeout=25)
+            if r.status_code == 404:
+                logger.warning("Workable: account %r not found (404)", company_slug)
+                return jobs
+            r.raise_for_status()
+            data = r.json()
+            postings.extend(data.get("results") or [])
+            next_page = data.get("nextPage")
+            if not next_page:
+                break
+            payload["token"] = next_page
+
+        for item in postings:
+            shortcode = item.get("shortcode")
+            if not shortcode:
+                continue
+            workplace = (item.get("workplace") or "").lower()
+            is_remote = bool(item.get("remote")) or workplace == "remote"
+            if remote_only and not is_remote:
+                continue
+
+            detail = {}
+            try:
+                dr = httpx.get(f"{base}/v2/accounts/{company_slug}/jobs/{shortcode}", headers=HEADERS, timeout=20)
+                if dr.status_code == 200:
+                    detail = dr.json()
+            except Exception as e:
+                logger.warning("Workable detail fetch failed for %s (%s): %s", company_name, shortcode, e)
+
+            description_html = "\n".join(
+                filter(None, [detail.get("description"), detail.get("requirements"), detail.get("benefits")])
+            )
             jobs.append({
-                "title": item.title.text if item.title else "",
+                "title": item.get("title") or "",
                 "company": company_name,
-                "location": None,
-                "description": clean_html_to_text(desc),
-                "apply_url": link,
-                "posted_at": None,
+                "location": _workable_location_text(detail or item),
+                "description": clean_html_to_text(description_html),
+                "apply_url": f"https://apply.workable.com/{company_slug}/j/{shortcode}/",
+                "posted_at": parse_date(item.get("published") or detail.get("published")),
                 "platform": "workable",
-                "external_job_id": link,
-                "raw": {},
+                "workplace_type": "Remote" if is_remote else (workplace.title() or None),
+                "external_job_id": str(shortcode),
+                "raw": {**item, "benefits": detail.get("benefits"), "source": "workable"},
                 "logo": logo,
             })
     except Exception:
-        logger.info("Workable RSS not available for %s", company_name)
+        logger.exception("Workable fetch error for %s (%s)", company_name, company_slug)
+    return jobs
+
+
+_WORKDAY_BOARD_RE = re.compile(
+    r"https?://(?P<tenant>[\w-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?(?P<site>[^/?#]+)"
+)
+_REMOTE_HINT_RE = re.compile(r"(?i)\b(remote|anywhere|worldwide|distributed|work from home)\b")
+
+
+def _workday_request(method, url, *, retries=8, pause=0.3, **kwargs):
+    """Workday tenants (e.g. Salesforce) rate-limit bursts with HTTP 429; pace calls and back off."""
+    for attempt in range(retries + 1):
+        time.sleep(pause)
+        r = httpx.request(method, url, **kwargs)
+        if r.status_code != 429 or attempt == retries:
+            r.raise_for_status()
+            return r
+        time.sleep(min(2 ** attempt, 30))
+
+
+def fetch_workday(board_url, company_name, logo=None, *, remote_only=True, max_pages=50):
+    """
+    Workday public CXS API behind https://{tenant}.{wdN}.myworkdayjobs.com/{site}.
+
+    The list endpoint caps pages at 20 postings and only reports `total` on the first page.
+    remote_only: search for "remote" and only open postings whose title/location hint at
+    remote or multiple locations (others can't pass the remote filter).
+    """
+    logo = logo or get_logo_url(company_name)
+    m = _WORKDAY_BOARD_RE.match((board_url or "").strip())
+    if not m:
+        logger.warning("Workday: unrecognised board URL %r", board_url)
+        return []
+    tenant, wd, site = m.group("tenant"), m.group("wd"), m.group("site")
+    host = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    api = f"{host}/wday/cxs/{tenant}/{site}"
+    headers = {**HEADERS, "Accept": "application/json", "Content-Type": "application/json"}
+    page_size = 20
+    jobs = []
+    try:
+        postings: list = []
+        total = None
+        for page in range(max_pages):
+            r = _workday_request(
+                "POST",
+                f"{api}/jobs",
+                json={
+                    "appliedFacets": {},
+                    "limit": page_size,
+                    "offset": page * page_size,
+                    "searchText": "remote" if remote_only else "",
+                },
+                headers=headers,
+                timeout=25,
+            )
+            data = r.json()
+            batch = data.get("jobPostings") or []
+            if total is None:
+                total = int(data.get("total") or 0)
+            postings.extend(batch)
+            if len(batch) < page_size or len(postings) >= total:
+                break
+
+        for p in postings:
+            path = p.get("externalPath")
+            if not path:
+                continue
+            title = p.get("title") or ""
+            locations_text = p.get("locationsText") or ""
+            if remote_only and not (
+                _REMOTE_HINT_RE.search(f"{title} {locations_text}") or "Locations" in locations_text
+            ):
+                continue
+            try:
+                dr = _workday_request("GET", f"{api}{path}", headers=headers, timeout=20)
+                info = dr.json().get("jobPostingInfo") or {}
+            except Exception as e:
+                logger.warning("Workday detail fetch failed for %s (%s): %s", company_name, path, e)
+                continue
+
+            locations = [info.get("location") or locations_text] + list(info.get("additionalLocations") or [])
+            remote_type = info.get("remoteType")
+            jobs.append({
+                "title": info.get("title") or title,
+                "company": company_name,
+                "location": " / ".join(filter(None, locations)),
+                "description": clean_html_to_text(info.get("jobDescription") or ""),
+                "apply_url": info.get("externalUrl") or f"{host}/{site}{path}",
+                "posted_at": parse_date(info.get("startDate")),
+                "platform": "workday",
+                "workplace_type": remote_type if isinstance(remote_type, str) else None,
+                "external_job_id": str(info.get("jobReqId") or info.get("id") or path),
+                "raw": {**p, "jobPostingInfo": {k: v for k, v in info.items() if k != "jobDescription"}},
+                "logo": logo,
+            })
+    except Exception:
+        logger.exception("Workday fetch error for %s (%s)", company_name, board_url)
+    return jobs
+
+
+def fetch_icims(base_url, company_name, logo=None, *, remote_only=True, max_pages=50):
+    """
+    Scrape an iCIMS career portal (https://careers-{tenant}.icims.com).
+
+    Search pages are paged via pr=0..N-1; detail pages embed schema.org JobPosting JSON-LD.
+    remote_only: only open postings whose list row mentions remote/anywhere.
+    """
+    logo = logo or get_logo_url(company_name)
+    base = (base_url or "").strip().rstrip("/")
+    jobs = []
+    try:
+        rows: list[dict] = []
+        seen = set()
+        page = 0
+        total_pages = 1
+        while page < min(total_pages, max_pages):
+            r = httpx.get(
+                f"{base}/jobs/search",
+                params={"ss": 1, "pr": page, "in_iframe": 1},
+                headers=JOBS_GE_HEADERS,
+                timeout=25,
+                follow_redirects=True,
+            )
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            pages_m = re.search(r"Page\s+\d+\s+of\s+(\d+)", soup.get_text(" "))
+            if pages_m:
+                total_pages = int(pages_m.group(1))
+            for row in soup.select(".iCIMS_JobsTable .row"):
+                a = row.select_one("a.iCIMS_Anchor[href]")
+                if not a:
+                    continue
+                href = a["href"]
+                id_m = re.search(r"/jobs/(\d+)/", href)
+                if not id_m or id_m.group(1) in seen:
+                    continue
+                seen.add(id_m.group(1))
+                loc_el = row.select_one(".header.left span:not(.sr-only)")
+                title_el = a.select_one("h3") or a
+                snippet_el = row.select_one(".description")
+                rows.append({
+                    "id": id_m.group(1),
+                    "url": href.split("?", 1)[0],
+                    "title": title_el.get_text(" ", strip=True),
+                    "location": loc_el.get_text(" ", strip=True) if loc_el else "",
+                    "snippet": snippet_el.get_text(" ", strip=True) if snippet_el else "",
+                })
+            page += 1
+
+        for row in rows:
+            if remote_only and not _REMOTE_HINT_RE.search(f"{row['title']} {row['location']} {row['snippet']}"):
+                continue
+            ld: dict = {}
+            try:
+                dr = httpx.get(
+                    row["url"], params={"in_iframe": 1}, headers=JOBS_GE_HEADERS, timeout=20, follow_redirects=True
+                )
+                dr.raise_for_status()
+                detail_soup = BeautifulSoup(dr.text, "html.parser")
+                for script in detail_soup.select('script[type="application/ld+json"]'):
+                    try:
+                        candidate = json.loads(script.string or script.get_text() or "")
+                    except Exception:
+                        continue
+                    if isinstance(candidate, dict) and candidate.get("@type") == "JobPosting":
+                        ld = candidate
+                        break
+            except Exception as e:
+                logger.warning("iCIMS detail fetch failed for %s (%s): %s", company_name, row["url"], e)
+
+            workplace = "Remote" if ld.get("jobLocationType") == "TELECOMMUTE" else None
+            jobs.append({
+                "title": ld.get("title") or row["title"],
+                "company": company_name,
+                "location": row["location"],
+                "description": clean_html_to_text(html.unescape(ld.get("description") or row["snippet"])),
+                "apply_url": row["url"],
+                "posted_at": parse_date(ld.get("datePosted")),
+                "platform": "icims",
+                "workplace_type": workplace,
+                "applicant_location_requirements": ld.get("applicantLocationRequirements"),
+                "external_job_id": row["id"],
+                "raw": {**row, "source": "icims", "validThrough": ld.get("validThrough")},
+                "logo": logo,
+            })
+    except Exception:
+        logger.exception("iCIMS fetch error for %s (%s)", company_name, base_url)
     return jobs
 
 
@@ -775,7 +1015,7 @@ def fetch_ashby(handle: str, company_name: str, logo=None):
             detail_url = f"https://jobs.ashbyhq.com/{handle}/{job_id}"
 
             # Skip obvious onsite/hybrid before hitting detail pages — they can't pass
-            # the worldwide-remote filter.
+            # the remote filter.
             wt_l = workplace.lower()
             loc_l = location.lower()
             looks_remote = wt_l == "remote" or "remote" in loc_l or "distributed" in loc_l
@@ -1039,6 +1279,278 @@ def fetch_remotive(api_url: str | None, aggregate_name: str, logo: str | None = 
             )
     except Exception:
         logger.exception("Remotive fetch failed for %s", url)
+    return jobs
+
+
+WWR_TECH_FEEDS = [
+    f"https://weworkremotely.com/categories/{slug}.rss"
+    for slug in (
+        "remote-full-stack-programming-jobs",
+        "remote-back-end-programming-jobs",
+        "remote-front-end-programming-jobs",
+        "remote-programming-jobs",
+        "remote-devops-sysadmin-jobs",
+        "remote-design-jobs",
+        "remote-product-jobs",
+    )
+]
+
+
+def fetch_weworkremotely(feed_urls=None, company_name="We Work Remotely", logo=None) -> list:
+    """
+    We Work Remotely public RSS feeds (tech categories only). Titles are "Company: Role";
+    <region> holds hiring eligibility ("Anywhere in the World", "USA Only", ...).
+    """
+    logo = logo or get_logo_url(company_name)
+    jobs: list = []
+    seen: set = set()
+    for feed_url in feed_urls or WWR_TECH_FEEDS:
+        try:
+            r = httpx.get(feed_url, headers=JOBS_GE_HEADERS, timeout=25, follow_redirects=True)
+            r.raise_for_status()
+            feed = feedparser.parse(r.content)
+        except Exception:
+            logger.exception("We Work Remotely feed failed: %s", feed_url)
+            continue
+        for e in feed.entries:
+            link = (e.get("link") or e.get("id") or "").strip()
+            if not link or link in seen:
+                continue
+            seen.add(link)
+            full_title = (e.get("title") or "").strip()
+            employer, _, role = full_title.partition(": ")
+            if not role:
+                employer, role = company_name, full_title
+            region = (e.get("region") or "").strip()
+            media = e.get("media_content") or []
+            jobs.append({
+                "title": role.strip(),
+                "company": employer.strip() or company_name,
+                "location": f"Remote · {region}" if region else "Remote",
+                "description": clean_html_to_text(e.get("summary") or e.get("description") or ""),
+                "apply_url": link,
+                "posted_at": parse_date(e.get("published")),
+                "platform": "weworkremotely",
+                "workplace_type": "Remote",
+                "external_job_id": link.rstrip("/").rsplit("/", 1)[-1],
+                "raw": {
+                    "source": "We Work Remotely",
+                    "region": region,
+                    "category": [t.get("term") for t in e.get("tags") or []],
+                    "type": e.get("type"),
+                    "skills": e.get("skills"),
+                    "expires_at": e.get("expires_at"),
+                },
+                "logo": (media[0].get("url") if media else None) or get_logo_url(employer or company_name),
+            })
+    return jobs
+
+
+HR_GE_API = "https://api.p.hr.ge/public-portal/tenant/1/api/v3"
+HR_GE_IT_SPECIALIZATION = "738"
+
+
+def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge", logo=None) -> list:
+    """
+    hr.ge public portal API. Lists one specialization (738 = Information Technologies) and
+    opens each announcement for its description and application email / URL.
+    """
+    logo = logo or get_logo_url(company_name)
+    headers = {**JOBS_GE_HEADERS, "Accept": "application/json", "Origin": "https://www.hr.ge"}
+    page_size = 100
+    jobs: list = []
+    try:
+        items: list = []
+        start = 0
+        while True:
+            r = httpx.post(
+                f"{HR_GE_API}/announcement-search",
+                json={"Start": start, "Limit": page_size, "SpecializationCodes": [specialization_code]},
+                headers=headers,
+                timeout=25,
+            )
+            r.raise_for_status()
+            block = r.json()["data"]["announcements"]
+            batch = block.get("items") or []
+            items.extend(batch)
+            start += page_size
+            if not batch or start >= int(block.get("totalCount") or 0):
+                break
+
+        for item in items:
+            ann_id = item.get("announcementId")
+            if not ann_id:
+                continue
+            detail: dict = {}
+            try:
+                dr = httpx.get(f"{HR_GE_API}/announcement/{ann_id}", headers=headers, timeout=20)
+                dr.raise_for_status()
+                detail = dr.json()["data"]["announcement"] or {}
+            except Exception as e:
+                logger.warning("hr.ge detail fetch failed for %s: %s", ann_id, e)
+            app = detail.get("applicationDetails") or {}
+            employer = "" if item.get("isAnonymous") else (item.get("customerName") or "").strip()
+            locations = item.get("locations") or detail.get("addresses") or []
+            work_form = detail.get("employmentFormTypeName") or ""
+            jobs.append({
+                "title": (item.get("title") or "").strip(),
+                "company": employer or company_name,
+                "location": ", ".join(locations) or None,
+                "location_country": "Georgia",
+                "description": clean_html_to_text(html.unescape(detail.get("description") or "")),
+                "apply_url": app.get("applicationUrl") or app.get("websiteUrl") or f"https://www.hr.ge/announcement/{ann_id}",
+                "apply_email": app.get("email") or None,
+                "posted_at": parse_date(item.get("publishDate")),
+                "platform": "hr.ge",
+                "workplace_type": "Remote" if item.get("isWorkFromHome") else None,
+                "external_job_id": str(ann_id),
+                "raw": {
+                    "source": "hr.ge",
+                    "source_url": f"https://www.hr.ge/announcement/{ann_id}",
+                    "deadline": item.get("deadlineDate"),
+                    "employment_form": work_form,
+                    "salary_from": detail.get("salaryFrom"),
+                    "salary_to": detail.get("salaryTo"),
+                },
+                "logo": item.get("logoFilename") or detail.get("customerLogoUrl") or get_logo_url(employer or company_name),
+            })
+    except Exception:
+        logger.exception("hr.ge fetch failed (specialization %s)", specialization_code)
+    return jobs
+
+
+MYJOBS_GE_API = "https://api.myjobs.ge/api/ka/public/vacancies/v2"
+MYJOBS_GE_IT_CATEGORY = 726
+
+
+def fetch_myjobs_ge(category_id=MYJOBS_GE_IT_CATEGORY, company_name="MyJobs.ge", logo=None, max_pages=30) -> list:
+    """myjobs.ge public vacancies API, one category (726 = IT ტექნოლოგიები). The list already has descriptions."""
+    logo = logo or get_logo_url(company_name)
+    headers = {**JOBS_GE_HEADERS, "Accept": "application/json", "Origin": "https://www.myjobs.ge"}
+    jobs: list = []
+    try:
+        for page in range(1, max_pages + 1):
+            r = httpx.get(MYJOBS_GE_API, params={"page": page, "categories": category_id}, headers=headers, timeout=25)
+            r.raise_for_status()
+            data = r.json()
+            for v in data.get("data") or []:
+                if (v.get("category_data") or {}).get("id") != category_id:
+                    continue
+                vid = v.get("id")
+                company = v.get("company") or {}
+                employer = (company.get("brand_name") or v.get("recruiter_company_name") or "").strip()
+                desc_html = v.get("description") or ""
+                page_url = f"https://www.myjobs.ge/ka/vacancy/{vid}"
+                # Some ads are just "details at this link" (e.g. a SmartRecruiters posting).
+                external = re.search(r"href=['\"](https?://[^'\"]+)['\"]", desc_html)
+                city = ((v.get("country") or {}).get("city") or {}).get("title")
+                job_type = (v.get("job_type") or "").lower()
+                jobs.append({
+                    "title": (v.get("title") or "").strip(),
+                    "company": employer or company_name,
+                    "location": city,
+                    "location_country": "Georgia",
+                    "description": clean_html_to_text(desc_html),
+                    "apply_url": external.group(1) if external else page_url,
+                    "posted_at": parse_date(v.get("created_at")),
+                    "platform": "myjobs.ge",
+                    "workplace_type": {"remote": "Remote", "hybrid": "Hybrid", "on_site": "Onsite"}.get(job_type),
+                    "external_job_id": str(vid),
+                    "raw": {
+                        "source": "myjobs.ge",
+                        "source_url": page_url,
+                        "sub_category": ((v.get("category_data") or {}).get("sub_category") or {}).get("title"),
+                        "employment_type": v.get("employment_type"),
+                        "salary_from": v.get("salary_from"),
+                        "salary_to": v.get("salary_to"),
+                    },
+                    "logo": get_logo_url(employer) if employer else logo,
+                })
+            if not data.get("next_page_url"):
+                break
+    except Exception:
+        logger.exception("myjobs.ge fetch failed (category %s)", category_id)
+    return jobs
+
+
+JOBS_SS_GE_IT_SPHERE = 68
+# jobs.ss.ge's IT sphere also holds printing / ATM / copier technician ads; keep real tech titles.
+_SS_GE_TECH_TITLE = re.compile(
+    r"(?i)(\bIT\b|\bაიტი|პროგრამ|დეველოპ|developer|engineer|ინჟინ|სისტემ|ქსელ|network|"
+    r"ადმინისტრატორ|admin|მონაცემ|data|ანალიტ|analyst|ტესტ|\bQA\b|devops|კიბერ|security|"
+    r"web|ვებ|დიზაინ|design|1C|ERP|SAP|helpdesk|ჰელპდესკ|support)"
+)
+
+
+def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", logo=None, max_pages=20) -> list:
+    """
+    jobs.ss.ge gateway API. Search needs the anonymous bearer token the site sets in the
+    `ss-jobs-access-token` cookie on any page load.
+    """
+    logo = logo or get_logo_url(company_name)
+    page_size = 50
+    jobs: list = []
+    try:
+        with httpx.Client(headers=JOBS_GE_HEADERS, follow_redirects=True, timeout=25) as client:
+            client.get("https://jobs.ss.ge/ka")
+            token = client.cookies.get("ss-jobs-access-token")
+            if not token:
+                logger.warning("jobs.ss.ge: no access token cookie; skipping")
+                return jobs
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "accept-language": "ka",
+                "os": "web",
+                "authorization": f"Bearer {token}",
+            }
+            for page in range(1, max_pages + 1):
+                r = client.post(
+                    "https://jobs-gateway.ss.ge/Jobs/search",
+                    json={
+                        "currencyId": 1,
+                        "sphereId": [sphere_id],
+                        "withoutCv": None,
+                        "onlyWithSalary": False,
+                        "paging": {"limit": page_size, "offset": page},
+                        "jobsDealType": 1,
+                    },
+                    headers=headers,
+                )
+                r.raise_for_status()
+                result = r.json().get("result") or {}
+                items = result.get("items") or []
+                for v in items:
+                    title = ((v.get("title") or {}).get("ka") or (v.get("title") or {}).get("text") or "").strip()
+                    if not _SS_GE_TECH_TITLE.search(title):
+                        continue
+                    vid = v.get("id")
+                    page_url = f"https://jobs.ss.ge/ka/details/{v.get('seoTitle') or 'vacancy'}-{vid}"
+                    city = ((v.get("address") or {}).get("city") or {}).get("ka")
+                    employer = (v.get("publisherName") or "").strip()
+                    jobs.append({
+                        "title": title,
+                        "company": employer or company_name,
+                        "location": city,
+                        "location_country": "Georgia",
+                        "description": clean_html_to_text((v.get("description") or {}).get("ka") or ""),
+                        "apply_url": page_url,
+                        "posted_at": parse_date(v.get("startDate")),
+                        "platform": "jobs.ss.ge",
+                        "external_job_id": str(vid),
+                        "raw": {
+                            "source": "jobs.ss.ge",
+                            "source_url": page_url,
+                            "deadline": v.get("endDate"),
+                            "salary_from": v.get("salaryFrom"),
+                            "salary_to": v.get("salaryTo"),
+                        },
+                        "logo": v.get("logo") or (get_logo_url(employer) if employer else logo),
+                    })
+                if len(items) < page_size or page * page_size >= int(result.get("totalCount") or 0):
+                    break
+    except Exception:
+        logger.exception("jobs.ss.ge fetch failed (sphere %s)", sphere_id)
     return jobs
 
 

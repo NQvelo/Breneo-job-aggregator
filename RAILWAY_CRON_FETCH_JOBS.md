@@ -1,6 +1,7 @@
 # Railway: Daily cron for job data updates (`fetch_jobs`)
 
-Fetched jobs (jobs.ge, Greenhouse, Lever, Ashby, Remotive) are refreshed **once a day** by a
+Fetched jobs (Georgian boards jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge; Greenhouse, Lever, Ashby,
+Workable, SmartRecruiters, Workday, iCIMS, Remotive, We Work Remotely) are refreshed **once a day** by a
 **separate Railway Cron service**. Employer-posted jobs (`platform="employer"`) are created
 instantly through the API and are never modified or deleted by `fetch_jobs`.
 
@@ -26,7 +27,7 @@ Do **not** use the cron command as the web service start command.
      ```bash
      python manage.py migrate --noinput && python manage.py fetch_jobs
      ```
-   - **Cron Schedule:** `30 20 * * *` — every day at 20:30 UTC = **00:30 Georgia time (UTC+4)**.
+   - **Cron Schedule:** `45 20 * * *` — every day at 20:45 UTC = **00:45 Georgia time (UTC+4)**.
    - **Restart Policy:** `Never` (a cron run must exit; it must not be restarted in a loop).
 4. **Variables:** reference the same variables as the web service — at minimum `DATABASE_URL`
    (link the Postgres service). Add any keys the fetchers use (e.g. `GEMINI_API_KEY` if set on web).
@@ -39,6 +40,10 @@ If a run is still active when the next one is due, Railway skips the new run.
 ## 3. What a run does
 
 1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`).
+   Georgian boards are read from their IT category only (onsite jobs allowed); an ad cross-posted on
+   several of them is kept once, preferring jobs.ge. All other jobs are kept only if they are remote
+   (region-limited remote such as "Remote - US" is allowed) and have a tech-role title. A full run takes roughly 30 minutes; the large Workday
+   boards (NVIDIA, Salesforce, CrowdStrike) open every remote posting's detail page.
 2. Upserts each job by `(platform, external_job_id)`, sets `is_active=True` and `last_seen_at=now`.
 3. For each source that returned data, jobs missing from today's feed are marked `is_active=False`
    (hidden from the API). If a source fails or returns nothing, its jobs are left untouched.

@@ -259,6 +259,28 @@ def _location_names_specific_geo(loc: str) -> bool:
     return False
 
 
+def is_remote_listing(job_dict: dict[str, Any]) -> bool:
+    """
+    Return True for any remote role, including region-limited ones (Remote US, Remote EMEA).
+
+    Same remote detection as is_remote_worldwide_listing, without the worldwide requirement.
+    Onsite / hybrid / city-only listings are rejected.
+    """
+    raw = job_dict.get("raw") if isinstance(job_dict.get("raw"), dict) else {}
+    workplace_type = (
+        job_dict.get("workplace_type")
+        or raw.get("workplaceType")
+        or raw.get("workplace_type")
+    )
+    desc = job_dict.get("description") or ""
+    return _is_remote_role(
+        (job_dict.get("location") or "").strip(),
+        (job_dict.get("title") or "").strip(),
+        desc if isinstance(desc, str) else str(desc),
+        workplace_type if isinstance(workplace_type, str) else None,
+    )
+
+
 def is_remote_worldwide_listing(job_dict: dict[str, Any]) -> bool:
     """
     Return True only for remote roles that look open to applicants worldwide.
