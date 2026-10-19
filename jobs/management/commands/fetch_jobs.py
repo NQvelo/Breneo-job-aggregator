@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings as django_settings
-from jobs.models import Company, Job
+from jobs.models import Company, Job, deadline_cutoff_ge
 from jobs.utils import parse_date, process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.job_normalizer import normalize_job_fields, parse_stored_location_fields
@@ -392,6 +392,14 @@ class Command(BaseCommand):
                         ext_id = str(ext_id).strip()[:255]
                     if not ext_id:
                         continue
+                    # Fetcher saw the listing but couldn't load its details: keep the stored row as is.
+                    if j.get("seen_only"):
+                        found_ids.add(ext_id)
+                        seen_update = {"last_seen_at": run_started_at}
+                        if j.get("deadline"):
+                            seen_update["deadline"] = j["deadline"]
+                        Job.objects.filter(platform=platform, external_job_id=ext_id).update(**seen_update)
+                        continue
 
                     # Georgian boards: keep local IT listings, but only the first copy of an ad
                     # cross-posted on several of them. All other platforms: remote AND tech titles.
@@ -459,6 +467,8 @@ class Command(BaseCommand):
                     }
                     if pcountry is not None:
                         defaults["location_country"] = pcountry
+                    if j.get("deadline"):
+                        defaults["deadline"] = j["deadline"]
                     if parsed_posted is not None:
                         defaults["posted_at"] = parsed_posted
 
@@ -652,9 +662,11 @@ class Command(BaseCommand):
                         qs = Job.objects.filter(platform=platform)
                     else:
                         qs = Job.objects.filter(platform=platform, company=company_obj)
+                    # Jobs stay visible until the day after their deadline, even if gone from the feed.
                     inactive_count = (
                         qs.filter(is_active=True)
                         .exclude(external_job_id__in=found_ids)
+                        .exclude(deadline__gte=deadline_cutoff_ge(run_started_at))
                         .update(is_active=False)
                     )
                     if inactive_count > 0:
@@ -670,9 +682,13 @@ class Command(BaseCommand):
         # Covers removed companies and sources that keep failing; employer jobs are excluded.
         try:
             stale_cutoff = run_started_at - timedelta(days=STALE_JOB_GRACE_DAYS)
-            stale_qs = Job.objects.filter(platform__in=PLATFORM_TO_FETCHER.keys()).filter(
-                Q(last_seen_at__lt=stale_cutoff)
-                | Q(last_seen_at__isnull=True, fetched_at__lt=stale_cutoff)
+            stale_qs = (
+                Job.objects.filter(platform__in=PLATFORM_TO_FETCHER.keys())
+                .filter(
+                    Q(last_seen_at__lt=stale_cutoff)
+                    | Q(last_seen_at__isnull=True, fetched_at__lt=stale_cutoff)
+                )
+                .exclude(deadline__gte=deadline_cutoff_ge(run_started_at))
             )
             deleted_count, _ = stale_qs.delete()
             if deleted_count > 0:

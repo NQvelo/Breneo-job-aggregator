@@ -17,7 +17,7 @@ from django.utils import timezone
 from datetime import timedelta
 from urllib.parse import unquote
 import base64
-from .models import Company, Job
+from .models import Company, Job, visible_jobs_q
 from .serializers import (
     CompanyJobsSerializer,
     NestedJobSerializer,
@@ -67,12 +67,13 @@ class JobsGroupedByCompany(APIView):
 
     def get(self, request):
         # Prefetch only active jobs and filter companies that have at least one active job
+        visible_jobs = Job.objects.filter(visible_jobs_q())
         companies = (
             Company.objects.prefetch_related(
-                Prefetch("jobs", queryset=Job.objects.filter(is_active=True)),
+                Prefetch("jobs", queryset=visible_jobs),
                 "industries",
             )
-            .filter(jobs__is_active=True)
+            .filter(jobs__in=visible_jobs)
             .distinct()
         )
         serializer = CompanyJobsSerializer(
@@ -189,8 +190,8 @@ class JobSearchView(APIView):
         if not use_offset_limit:
             limit = num_pages
         
-        # Start with active jobs only, prefetch company for better performance
-        jobs = Job.objects.filter(is_active=True).select_related("company").prefetch_related(
+        # Active jobs whose deadline hasn't been reached; prefetch company for better performance
+        jobs = Job.objects.filter(visible_jobs_q()).select_related("company").prefetch_related(
             "company__industries",
             "company__staff_memberships",
         )

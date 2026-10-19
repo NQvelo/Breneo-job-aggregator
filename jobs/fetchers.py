@@ -10,6 +10,7 @@ import html
 import json
 import re
 import time
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -403,6 +404,7 @@ def fetch_icims(base_url, company_name, logo=None, *, remote_only=True, max_page
                 "description": clean_html_to_text(html.unescape(ld.get("description") or row["snippet"])),
                 "apply_url": row["url"],
                 "posted_at": parse_date(ld.get("datePosted")),
+                "deadline": _parse_deadline(ld.get("validThrough")),
                 "platform": "icims",
                 "workplace_type": workplace,
                 "applicant_location_requirements": ld.get("applicantLocationRequirements"),
@@ -639,10 +641,48 @@ def _jobs_ge_parse_published(text: str, now=None):
     return published
 
 
-def _jobs_ge_get(url, timeout=20):
-    r = httpx.get(url, headers=JOBS_GE_HEADERS, timeout=timeout, follow_redirects=True)
-    r.raise_for_status()
-    return r
+GE_TZ = ZoneInfo("Asia/Tbilisi")
+
+
+def _parse_deadline(value):
+    """Parse a source deadline; naive values (hr.ge "2026-11-14T23:59:00") are Georgia local time."""
+    dt = parse_date(value)
+    if dt is not None and timezone.is_naive(dt):
+        dt = dt.replace(tzinfo=GE_TZ)
+    return dt
+
+
+def _jobs_ge_parse_deadline(text: str, now=None):
+    """Parse a jobs.ge deadline like '14 ნოემბერი' (no year). Deadlines are upcoming, so a date
+    more than two months in the past belongs to next year (e.g. '10 იანვარი' seen in December)."""
+    m = re.match(r"\s*(\d{1,2})\s+(\S+)", text or "")
+    month = _JOBS_GE_MONTHS.get(m.group(2)) if m else None
+    if not month:
+        return None
+    today = (now or timezone.now()).astimezone(GE_TZ)
+    try:
+        deadline = today.replace(month=month, day=int(m.group(1)), hour=0, minute=0, second=0, microsecond=0)
+        if deadline < today - timedelta(days=60):
+            deadline = deadline.replace(year=today.year + 1)
+    except ValueError:
+        return None
+    return deadline
+
+
+def _jobs_ge_get(url, timeout=20, retries=3):
+    """jobs.ge throttles bursts of detail-page requests; retry transient failures with backoff."""
+    for attempt in range(retries + 1):
+        try:
+            r = httpx.get(url, headers=JOBS_GE_HEADERS, timeout=timeout, follow_redirects=True)
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(2 ** attempt)
+                continue
+            r.raise_for_status()
+            return r
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt == retries:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def _jobs_ge_is_excluded_url(url: str) -> bool:
@@ -887,6 +927,13 @@ def fetch_jobs_ge_listings(
                 detail_r = _jobs_ge_get(detail_url)
             except Exception as e:
                 logger.warning("jobs.ge: failed to fetch detail %s: %s", detail_url, e)
+                # Still listed on jobs.ge: keep the stored copy active instead of hiding it.
+                jobs.append({
+                    "external_job_id": item["external_job_id"],
+                    "platform": "jobs.ge",
+                    "deadline": _jobs_ge_parse_deadline(item.get("deadline")),
+                    "seen_only": True,
+                })
                 continue
 
             detail_soup = BeautifulSoup(detail_r.content, "html.parser")
@@ -941,6 +988,7 @@ def fetch_jobs_ge_listings(
                 "apply_url": apply_url,
                 "apply_email": apply_email,
                 "posted_at": _jobs_ge_parse_published(item.get("published")),
+                "deadline": _jobs_ge_parse_deadline(item.get("deadline")),
                 "platform": "jobs.ge",
                 "external_job_id": item["external_job_id"],
                 "raw": {
@@ -954,8 +1002,9 @@ def fetch_jobs_ge_listings(
             })
 
         logger.info(
-            "jobs.ge: kept %s jobs (skipped thin=%s, english_stub=%s) from %s listings",
-            len(jobs),
+            "jobs.ge: kept %s jobs (detail fetch failed=%s, skipped thin=%s, english_stub=%s) from %s listings",
+            sum(1 for j in jobs if not j.get("seen_only")),
+            sum(1 for j in jobs if j.get("seen_only")),
             skipped_thin,
             skipped_english,
             len(listings),
@@ -1330,6 +1379,7 @@ def fetch_weworkremotely(feed_urls=None, company_name="We Work Remotely", logo=N
                 "description": clean_html_to_text(e.get("summary") or e.get("description") or ""),
                 "apply_url": link,
                 "posted_at": parse_date(e.get("published")),
+                "deadline": _parse_deadline(e.get("expires_at")),
                 "platform": "weworkremotely",
                 "workplace_type": "Remote",
                 "external_job_id": link.rstrip("/").rsplit("/", 1)[-1],
@@ -1401,6 +1451,7 @@ def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge
                 "apply_url": app.get("applicationUrl") or app.get("websiteUrl") or f"https://www.hr.ge/announcement/{ann_id}",
                 "apply_email": app.get("email") or None,
                 "posted_at": parse_date(item.get("publishDate")),
+                "deadline": _parse_deadline(item.get("deadlineDate")),
                 "platform": "hr.ge",
                 "workplace_type": "Remote" if item.get("isWorkFromHome") else None,
                 "external_job_id": str(ann_id),
@@ -1536,6 +1587,7 @@ def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", 
                         "description": clean_html_to_text((v.get("description") or {}).get("ka") or ""),
                         "apply_url": page_url,
                         "posted_at": parse_date(v.get("startDate")),
+                        "deadline": _parse_deadline(v.get("endDate")),
                         "platform": "jobs.ss.ge",
                         "external_job_id": str(vid),
                         "raw": {

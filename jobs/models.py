@@ -1,7 +1,30 @@
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Job deadlines are Georgian calendar dates.
+JOB_DEADLINE_TZ = ZoneInfo("Asia/Tbilisi")
+
+
+def deadline_cutoff_ge(now=None):
+    """Earliest deadline still shown: start of yesterday in Georgia, so jobs stay up one day after their deadline."""
+    local = (now or timezone.now()).astimezone(JOB_DEADLINE_TZ)
+    return (local - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def deadline_open_q(now=None):
+    """Jobs stay visible through the day after their deadline date (Georgia time); no deadline = no limit."""
+    return Q(deadline__isnull=True) | Q(deadline__gte=deadline_cutoff_ge(now))
+
+
+def visible_jobs_q(now=None):
+    return Q(is_active=True) & deadline_open_q(now)
 
 # Matching field enums for job-user matching system
 WORK_MODE_CHOICES = [
@@ -506,6 +529,12 @@ class Job(models.Model):
         blank=True,
         null=True,
         help_text="Last time fetch_jobs saw this job in its source feed (null for employer jobs)",
+    )
+    deadline = models.DateTimeField(
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Application deadline from the source; the job stays visible until the day after this date (Georgia time)",
     )
     is_active = models.BooleanField(default=True)
 

@@ -93,7 +93,7 @@ class JobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, Dynamic
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
             'data_completeness_score', 'description', 'description_short', 'responsibilities', 'qualifications',
-            'salary', 'apply_url', 'apply_email', 'platform', 'external_job_id', 'posted_at', 'fetched_at', 'is_active',
+            'salary', 'apply_url', 'apply_email', 'platform', 'external_job_id', 'posted_at', 'deadline', 'fetched_at', 'is_active',
             'supports_in_app_apply', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
@@ -279,7 +279,7 @@ class NestedJobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, D
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
             'description', 'description_short', 'responsibilities', 'qualifications',
             'salary', 'apply_url', 'apply_email', 'platform', 'external_job_id',
-            'posted_at', 'fetched_at', 'is_active', 'supports_in_app_apply', 'raw',
+            'posted_at', 'deadline', 'fetched_at', 'is_active', 'supports_in_app_apply', 'raw',
         ]
         read_only_fields = ['id', 'fetched_at', 'supports_in_app_apply']
 
@@ -314,7 +314,9 @@ class CompanyDetailSerializer(DynamicFieldsModelSerializer):
 
     def get_job_count(self, obj):
         """Get count of active jobs for this company"""
-        return obj.jobs.filter(is_active=True).count()
+        from jobs.models import visible_jobs_q
+
+        return obj.jobs.filter(visible_jobs_q()).count()
     
     def to_representation(self, instance):
         """Ensure None values are handled properly"""
@@ -351,8 +353,9 @@ class CompanyJobsSerializer(serializers.ModelSerializer):
         return resolved_company_logo_url(obj, self.context.get("request"))
     
     def get_jobs(self, obj):
-        # Filter only active jobs and serialize them
-        active_jobs = obj.jobs.filter(is_active=True)
+        from jobs.models import visible_jobs_q
+
+        active_jobs = obj.jobs.filter(visible_jobs_q())
         return NestedJobSerializer(active_jobs, many=True, context=self.context).data
     
     def to_representation(self, instance):

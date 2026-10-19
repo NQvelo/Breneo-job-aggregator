@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
-from .models import Job, Company
+from .models import Job, Company, deadline_open_q
 from .serializers import NestedJobSerializer, JobSerializer
 from .query_parser import JobQueryParser, parse_query_to_search_params
 
@@ -52,7 +52,7 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         return NestedJobSerializer # Default
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(deadline_open_q())
         
         # Search
         search_query = self.request.query_params.get('search')
