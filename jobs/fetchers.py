@@ -669,20 +669,39 @@ def _jobs_ge_parse_deadline(text: str, now=None):
     return deadline
 
 
-def _jobs_ge_get(url, timeout=20, retries=3):
-    """jobs.ge throttles bursts of detail-page requests; retry transient failures with backoff."""
+# jobs.ge robots.txt: "Crawl-delay: 5".
+JOBS_GE_CRAWL_DELAY = 5.0
+_JOBS_GE_BLOCK_STATUSES = (403, 410, 429)
+_jobs_ge_last_request = 0.0
+
+
+class JobsGeBlocked(Exception):
+    """jobs.ge refused or rate-limited us; stop requesting for this run."""
+
+
+def _jobs_ge_get(url, timeout=20, retries=2):
+    """
+    GET a jobs.ge page at most once per JOBS_GE_CRAWL_DELAY seconds.
+    Retries only timeouts / 5xx; a 403/410/429 raises JobsGeBlocked instead of retrying.
+    """
+    global _jobs_ge_last_request
     for attempt in range(retries + 1):
+        wait = _jobs_ge_last_request + JOBS_GE_CRAWL_DELAY - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _jobs_ge_last_request = time.monotonic()
         try:
             r = httpx.get(url, headers=JOBS_GE_HEADERS, timeout=timeout, follow_redirects=True)
-            if r.status_code in (429, 500, 502, 503, 504) and attempt < retries:
-                time.sleep(2 ** attempt)
-                continue
-            r.raise_for_status()
-            return r
         except (httpx.TimeoutException, httpx.TransportError):
             if attempt == retries:
                 raise
-            time.sleep(2 ** attempt)
+            continue
+        if r.status_code in _JOBS_GE_BLOCK_STATUSES:
+            raise JobsGeBlocked(f"HTTP {r.status_code} for {url}")
+        if r.status_code >= 500 and attempt < retries:
+            continue
+        r.raise_for_status()
+        return r
 
 
 def _jobs_ge_is_excluded_url(url: str) -> bool:
@@ -921,12 +940,19 @@ def fetch_jobs_ge_listings(
         skipped_thin = 0
         skipped_english = 0
 
+        blocked = False
         for item in listings:
             detail_url = item["detail_url"]
-            try:
-                detail_r = _jobs_ge_get(detail_url)
-            except Exception as e:
-                logger.warning("jobs.ge: failed to fetch detail %s: %s", detail_url, e)
+            detail_r = None
+            if not blocked:
+                try:
+                    detail_r = _jobs_ge_get(detail_url)
+                except JobsGeBlocked as e:
+                    blocked = True
+                    logger.warning("jobs.ge: blocked (%s); not requesting remaining detail pages this run", e)
+                except Exception as e:
+                    logger.warning("jobs.ge: failed to fetch detail %s: %s", detail_url, e)
+            if detail_r is None:
                 # Still listed on jobs.ge: keep the stored copy active instead of hiding it.
                 jobs.append({
                     "external_job_id": item["external_job_id"],

@@ -42,8 +42,10 @@ If a run is still active when the next one is due, Railway skips the new run.
 1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`).
    Georgian boards are read from their IT category only (onsite jobs allowed); an ad cross-posted on
    several of them is kept once, preferring jobs.ge. All other jobs are kept only if they are remote
-   (region-limited remote such as "Remote - US" is allowed) and have a tech-role title. A full run takes roughly 30 minutes; the large Workday
-   boards (NVIDIA, Salesforce, CrowdStrike) open every remote posting's detail page.
+   (region-limited remote such as "Remote - US" is allowed) and have a tech-role title. A full run takes roughly 40 minutes; the large Workday
+   boards (NVIDIA, Salesforce, CrowdStrike) open every remote posting's detail page, and jobs.ge is
+   requested at most once every 5 seconds (its robots.txt `Crawl-delay`, about 12 minutes for ~140 pages).
+   If jobs.ge answers 403/410/429, the run stops requesting it; listings already seen keep their stored copy.
 2. Upserts each job by `(platform, external_job_id)`, sets `is_active=True` and `last_seen_at=now`.
 3. For each source that returned data, jobs missing from today's feed are marked `is_active=False`
    (hidden from the API). If a source fails or returns nothing, its jobs are left untouched.
