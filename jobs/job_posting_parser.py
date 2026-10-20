@@ -169,6 +169,12 @@ _RESPONSIBILITY_KEYWORDS = frozenset([
     "სამუშაო ამოცან",
     "მოვალეობ",  # responsibilities / duties (ძირითადი მოვალეობები)
     "პასუხისმგებლობ",  # responsibilities
+    "რას გააკეთებ",  # what you will do
+    "რას აკეთებ",
+    "სამუშაოს აღწერ",  # job description
+    "სამუშაოს ზოგადი აღწერ",
+    "ფუნქციები",  # functions
+    "ამოცანები",  # tasks
 ])
 
 _QUALIFICATION_KEYWORDS = frozenset([
@@ -183,9 +189,14 @@ _QUALIFICATION_KEYWORDS = frozenset([
     "თუ გაქვს",  # if you have (often in "this role is for you if you have…")
     "ვაკანსია შენთვის",  # this vacancy is for you
     "ვაკანსია თქვენთვის",
-    "ძირითადი მოთხოვნ",  # basic requirements (ძირითადი მოთხოვნები)
-    "საჭირო უნარ",  # required skills
+    "მოთხოვნ",  # requirements (მოთხოვნები, ძირითადი მოთხოვნები)
+    "უნარ",  # skills (უნარები, საჭირო უნარები)
     "რას ვეძებთ",  # what we are looking for
+    "ვის ვეძებთ",  # who we are looking for
+    "კვალიფიკაცი",  # qualifications
+    "სასურველი",  # preferred (სასურველი გამოცდილება)
+    "გამოცდილება",  # experience
+    "ცოდნა",  # knowledge
 ])
 
 _INTRO_KEYWORDS = frozenset([
@@ -207,6 +218,19 @@ _IGNORE_KEYWORDS = frozenset([
     "პერსონალურ მონაცემ",  # personal data (privacy block)
     "დისკრიმინაცი",  # anti-discrimination policy
     "გამოგზავნეთ",  # send (often "send your CV…")
+    "გამოაგზავნეთ",
+    "გამოგვიგზავნ",
+    "ველოდებით",  # we await (your CV)
+    "სამუშაო გრაფიკ",  # work schedule
+    "სამუშაო საათ",  # working hours
+    "სამუშაო პირობ",  # working conditions
+    "ანაზღაურებ",  # pay
+    "ხელფას",  # salary
+    "გთავაზობ",  # we offer
+    "შემოგთავაზებ",
+    "ბენეფიტ",  # benefits
+    "კონტაქტ",  # contact
+    "დაგვიკავშირდ",  # contact us
 ])
 
 
@@ -239,6 +263,8 @@ def is_heading(line: str, prev_line: str, next_line: str, threshold: int = 3) ->
     """
     s = line.strip()
     if not s:
+        return False
+    if _BULLET_MARKERS.match(s) and not s.endswith(":"):
         return False
 
     score = 0
@@ -444,47 +470,62 @@ def extract_items(section_body_lines: list[str], max_items: int = 12) -> list[st
         items = [s.strip() for s in sentences if 20 <= len(s.strip()) <= 280][:max_items]
         return _dedupe_items(items)[:max_items]
 
+    # With explicit bullets (incl. `**` in Georgian ads), short items like "უმაღლესი განათლება;"
+    # are real items, and unbulleted prose after a finished bullet (apply / privacy text) is not.
+    bulleted = sum(1 for ln in non_empty if _starts_with_bullet_marker(ln)) >= 2
+
     items: list[str] = []
     current: list[str] = []
+    current_bullet = False
+    dropping = False
     prev = ""
+    last_text = ""
+
+    def flush() -> None:
+        if not current:
+            return
+        item = _strip_bullet_prefix(" ".join(current).strip())
+        min_len = 3 if current_bullet else 20
+        if min_len <= len(item) <= 280 and not item.endswith(":"):
+            items.append(item)
 
     for raw in section_body_lines:
         line = raw.rstrip()
         if not line.strip():
-            if current:
-                item = " ".join(current).strip()
-                item = _strip_bullet_prefix(item)
-                if 20 <= len(item) <= 280 and not item.endswith(":"):
-                    items.append(item)
-                current = []
+            flush()
+            current = []
             prev = line
             continue
+
+        is_bullet = _starts_with_bullet_marker(line)
+        if bulleted and not is_bullet:
+            prev_end = prev.rstrip()[-1:] if prev.strip() else ""
+            last_end = last_text[-1:]
+            if dropping or (current_bullet and last_end in (".", ";", "!", "?")):
+                flush()
+                current = []
+                dropping = True
+                prev = line
+                continue
+            if current and prev_end in ("—", "–", "-", ",", "("):
+                current.append(line.strip())
+                prev = line
+                last_text = line.strip()
+                continue
+        if is_bullet:
+            dropping = False
 
         if current and _is_continuation_line(line, prev):
             current.append(line.strip())
         else:
-            if current:
-                item = " ".join(current).strip()
-                item = _strip_bullet_prefix(item)
-                if 20 <= len(item) <= 280 and not item.endswith(":"):
-                    items.append(item)
-                current = []
-
-            stripped = _strip_bullet_prefix(line)
-            # Plain-line bullet: reasonable length, not a heading
-            if 20 <= len(stripped) <= 240 and not stripped.endswith(":"):
-                current = [stripped]
-            else:
-                current = [stripped]
+            flush()
+            current = [_strip_bullet_prefix(line)]
+            current_bullet = is_bullet
 
         prev = line
+        last_text = line.strip()
 
-    if current:
-        item = " ".join(current).strip()
-        item = _strip_bullet_prefix(item)
-        if 20 <= len(item) <= 280 and not item.endswith(":"):
-            items.append(item)
-
+    flush()
     return _dedupe_items(items)[:max_items]
 
 

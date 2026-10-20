@@ -747,6 +747,49 @@ def _jobs_ge_core_description(description: str) -> str:
     return "\n".join(lines)
 
 
+_JOBS_GE_BULLET_RE = re.compile(r"^(?:\*\*|\*|•|▪|-)\s*")
+
+
+def _jobs_ge_body_text(detail_soup: BeautifulSoup) -> str:
+    """
+    Posting body from the jobs.ge detail table: header rows (title, provider, dates) dropped,
+    inline tags (<b>, <a>) kept on their line, <br> as line breaks, bullets normalized to "• ".
+    """
+    table = detail_soup.select_one("table.dtable") or detail_soup.select_one(".dtable")
+    if not table:
+        return ""
+    cells = [td for td in table.find_all("td") if "dtitle" not in (td.get("class") or [])]
+    if not cells:
+        return ""
+    body = max(cells, key=lambda td: len(td.get_text(strip=True)))
+    # Source newlines in the HTML are just wrapping; only <br> / blocks are real breaks.
+    br_mark = "\u2063"
+    for br in body.find_all("br"):
+        br.replace_with(br_mark)
+    for block in body.find_all(["p", "div", "li", "tr"]):
+        block.insert_before(br_mark)
+        block.insert_after(br_mark)
+
+    lines = []
+    for raw in body.get_text().split(br_mark):
+        line = re.sub(r"\s+", " ", raw).strip()
+        if not line:
+            if lines and lines[-1]:
+                lines.append("")
+            continue
+        line = re.sub(r"\s+([.,;:!?])", r"\1", line)
+        if _JOBS_GE_BULLET_RE.match(line):
+            line = "• " + _JOBS_GE_BULLET_RE.sub("", line, count=1)
+        elif lines and lines[-1].startswith("• ") and not lines[-1].endswith((".", ";", ":", "!", "?")):
+            lines[-1] = f"{lines[-1]} {line}"
+            continue
+        lines.append(line)
+    text = "\n".join(lines).strip()
+    # Trailing pointer to the English version of the same ad.
+    text = re.sub(r"\n*განცხადების სრულად ნახვა შესაძლებელია ინგლისურ ენაზე\.?\s*$", "", text)
+    return text.strip()
+
+
 def _jobs_ge_has_sufficient_detail(description: str) -> bool:
     """
     Keep only postings that include real duties/requirements on jobs.ge itself.
@@ -977,10 +1020,8 @@ def fetch_jobs_ge_listings(
             apply_url, apply_email = _jobs_ge_extract_apply_contacts(detail_soup, page_text)
 
             # Prefer the posting body table; fall back to full page text.
-            body_el = detail_soup.select_one("table.dtable") or detail_soup.select_one(".dtable")
-            if body_el:
-                description = clean_html_to_text(str(body_el))
-            else:
+            description = _jobs_ge_body_text(detail_soup)
+            if not description:
                 description = page_text
                 for marker in ("ყველა ვაკანსია", "დასახელება:"):
                     idx = description.find(marker)
