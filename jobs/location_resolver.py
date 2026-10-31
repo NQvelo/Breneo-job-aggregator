@@ -454,6 +454,78 @@ def _disambiguate_bare(
     return _res(None, None, None, True, GEORGIA_AMBIGUOUS)
 
 
+_STATE_DASH_SITE_RE = re.compile(r"^(?P<state>[A-Za-z][A-Za-z .]*?)\s+-\s+(?P<rest>.+)$")
+
+
+def _resolve_state_dash_site(
+    text: str,
+    *,
+    explicit_country: str | None,
+    platform: str | None,
+    context: str | None,
+) -> LocationResolution | None:
+    """Workday style "<U.S. state> - <city | metro | Remote>", e.g. "Georgia - Atlanta Metro - Remote"."""
+    match = _STATE_DASH_SITE_RE.match(text)
+    if not match:
+        return None
+    state = _US_STATE_NAMES.get(_norm_token(match.group("state")))
+    if not state:
+        return None
+    rest_parts = [part.strip() for part in re.split(r"\s+-\s+", match.group("rest")) if part.strip()]
+    place_parts = [part for part in rest_parts if not _is_non_place(part)]
+    city = re.sub(r"(?i)\s+metro$", "", place_parts[0]).strip() if place_parts else None
+    if state != "Georgia":
+        return _res(city, "USA", state, True, None)
+    if city and _match_georgian_city(city):
+        return _res(_match_georgian_city(city), "Georgia", None, True, GEORGIA_COUNTRY)
+    if city and _us_georgia_city_name(city):
+        return _res(_us_georgia_city_name(city), "USA", "Georgia", True, GEORGIA_US_STATE)
+    if city:
+        return _res(city, "USA", "Georgia", True, GEORGIA_US_STATE)
+    return _disambiguate_bare(explicit_country=explicit_country, platform=platform, context=context)
+
+
+def _resolve_sites(
+    text: str,
+    *,
+    explicit_country: str | None,
+    platform: str | None,
+    context: str | None,
+) -> LocationResolution | None:
+    """
+    Country/region for a multi-site list joined with " / " (Workday, Workable).
+
+    Any U.S. site makes it a U.S. job, so "Georgia - Remote / Texas - Remote" is
+    the state. Otherwise the first site with a country wins. City text is left
+    to the caller so the remote filter still sees the full original string.
+    """
+    sites = [site.strip() for site in re.split(r"\s+/\s+", text) if site.strip()]
+    if len(sites) < 2:
+        return None
+    resolved = [
+        _resolve_segment(site, explicit_country=explicit_country, platform=platform, context=context)
+        for site in sites[:30]
+    ]
+    us_sites = [site for site in resolved if site.country == "USA"]
+    if us_sites:
+        has_georgia_state = any(site.region == "Georgia" for site in us_sites) or any(
+            site.georgia == GEORGIA_AMBIGUOUS for site in resolved
+        )
+        return _res(
+            None,
+            "USA",
+            us_sites[0].region,
+            True,
+            GEORGIA_US_STATE if has_georgia_state else None,
+        )
+    for site in resolved:
+        if site.country:
+            return _res(None, site.country, site.region, True, site.georgia)
+    if any(site.georgia == GEORGIA_AMBIGUOUS for site in resolved):
+        return _res(None, None, None, True, GEORGIA_AMBIGUOUS)
+    return None
+
+
 def _resolve_segment(
     text: str,
     *,
@@ -464,6 +536,12 @@ def _resolve_segment(
     cleaned = text.strip()
     if not cleaned:
         return _res(None, None, None, False, None)
+
+    dash_site = _resolve_state_dash_site(
+        cleaned, explicit_country=explicit_country, platform=platform, context=context
+    )
+    if dash_site is not None:
+        return dash_site
 
     if _GEORGIA_COUNTRY_RE.search(cleaned) and not _GEORGIA_US_RE.search(cleaned):
         city = _match_georgian_city(cleaned)
@@ -639,12 +717,21 @@ def resolve_location(
 
     segments = [segment.strip() for segment in re.split(r"\s*;\s*", text) if segment.strip()]
     primary = segments[0] if segments else text
-    result = _resolve_segment(
+    sites = _resolve_sites(
         primary,
         explicit_country=explicit_country,
         platform=platform,
         context=context,
     )
+    if sites is not None:
+        result = _res(primary, sites.country, sites.region, sites.country_authoritative, sites.georgia)
+    else:
+        result = _resolve_segment(
+            primary,
+            explicit_country=explicit_country,
+            platform=platform,
+            context=context,
+        )
     if not result.country_authoritative and not result.country and len(segments) > 1:
         full = _resolve_segment(
             text,
@@ -705,6 +792,8 @@ def _name_match_q(names: set[str] | frozenset[str]) -> Q:
 
 def _georgia_country_text_q() -> Q:
     query = _name_match_q(set(GEORGIAN_CITY_NAMES))
+    for city in ("Tbilisi", "Batumi", "Kutaisi", "Rustavi", "Zugdidi"):
+        query |= Q(location__icontains=city)
     query |= Q(location__icontains="საქართველო")
     query |= Q(location__icontains="თბილისი")
     query |= Q(location__icontains="ბათუმი")
@@ -736,30 +825,41 @@ def _us_state_text_q() -> Q:
         | Q(location__icontains=", GA,")
         | Q(location__icontains=",GA,")
     )
+    # Workday multi-site lists: "Georgia - Remote / Texas - Remote", "Georgia - Atlanta Metro".
+    workday_state = (
+        Q(location__istartswith="Georgia - ") | Q(location__icontains="/ Georgia - ")
+    ) & ~_georgia_country_text_q()
     legacy_cities = _name_match_q(set(_US_GEORGIA_CITIES)) & (
         Q(location_country__iexact="Georgia") | Q(location_region__iexact="Georgia")
     )
-    return comma_state | phrases | legacy_cities
+    return comma_state | phrases | workday_state | legacy_cities
 
 
 def georgia_country_jobs_q() -> Q:
-    """Jobs in the country of Georgia. U.S. state rows never match."""
-    bare_untrusted = Q(location__iexact="Georgia") & ~Q(platform__in=TRUSTED_GEORGIA_COUNTRY_PLATFORMS)
-    remote_bare = (
-        (Q(location__iexact="Remote") | Q(location__iexact="Remote, Georgia") | Q(location__iexact="Hybrid, Georgia"))
+    """
+    Every job in the country of Georgia, and nothing else.
+
+    Georgian boards (and employer posts set to Georgia) count by source. Jobs from
+    international ATS feeds also need the location text to name the country (a
+    Georgian city or "Georgia, Country"); their stored country alone is not enough,
+    because older rows labeled every "Georgia" (e.g. Salesforce "Georgia - Remote")
+    as the country.
+    """
+    no_country = Q(location_country__isnull=True) | Q(location_country="")
+    local_boards = Q(platform__in=LOCAL_GEORGIA_PLATFORMS) & (
+        Q(location_country__iexact="Georgia") | no_country
+    )
+    employer_posts = Q(platform="employer") & Q(location_country__iexact="Georgia")
+    international = (
+        ~Q(platform__in=TRUSTED_GEORGIA_COUNTRY_PLATFORMS)
         & Q(location_country__iexact="Georgia")
-        & ~Q(platform__in=TRUSTED_GEORGIA_COUNTRY_PLATFORMS)
+        & _georgia_country_text_q()
     )
-    us_text = _us_state_text_q()
-    structured = (
-        Q(location_country__iexact="Georgia")
+    return (
+        (local_boards | employer_posts | international)
+        & ~_us_state_text_q()
         & ~Q(location_region__iexact="Georgia")
-        & ~us_text
-        & ~bare_untrusted
-        & ~remote_bare
     )
-    proven_country = _georgia_country_text_q() & ~us_text
-    return structured | proven_country
 
 
 def georgia_us_state_jobs_q() -> Q:

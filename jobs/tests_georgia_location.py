@@ -100,6 +100,39 @@ class ResolveGeorgiaTests(TestCase):
         self.assertEqual(parse_stored_location_fields(None), (None, None))
         self.assertEqual(parse_stored_location_fields("   "), (None, None))
 
+    def test_workday_state_dash_sites_are_us(self):
+        multi = resolve_location(
+            "Georgia - Remote / Indiana - Remote / Massachusetts - Remote / Texas - Remote",
+            platform="workday",
+        )
+        self.assertEqual(multi.country, "USA")
+        self.assertEqual(multi.georgia, GEORGIA_US_STATE)
+
+        first_other = resolve_location(
+            "District of Columbia - Washington / Virginia - Remote / Georgia - Atlanta",
+            platform="workday",
+        )
+        self.assertEqual(first_other.country, "USA")
+        self.assertEqual(first_other.region, "District of Columbia")
+
+        atlanta = resolve_location("Georgia - Atlanta Metro - Remote", platform="workday")
+        self.assertEqual((atlanta.city, atlanta.country, atlanta.region), ("Atlanta", "USA", "Georgia"))
+
+        single = resolve_location("Georgia - Remote", platform="workday")
+        self.assertNotEqual(single.country, "Georgia")
+        self.assertEqual(single.georgia, GEORGIA_AMBIGUOUS)
+
+        tbilisi = resolve_location("Georgia - Tbilisi", platform="workday")
+        self.assertEqual(tbilisi.country, "Georgia")
+
+    def test_multi_country_remote_list_is_not_the_country(self):
+        cloudlinux = resolve_location(
+            "Remote · Warsaw, Masovian Voivodeship, Poland / Madrid, Community of Madrid, Spain "
+            "/ Tbilisi, Tbilisi, Georgia",
+            platform="workable",
+        )
+        self.assertEqual(cloudlinux.country, "Poland")
+
     def test_legacy_us_city_stored_as_country_is_repaired(self):
         repaired = resolve_location("Atlanta", stored_country="Georgia", platform="greenhouse")
         self.assertEqual(repaired.country, "USA")
@@ -212,6 +245,59 @@ class GeorgiaSearchFilterTests(TestCase):
             location_country="Georgia",
             location_region=None,
         )
+
+        # Live rows from the old parser: Salesforce Workday lists stored as country "Georgia".
+        for ext, loc in (
+            ("sf1", "Georgia - Remote / Indiana - Remote / Massachusetts - Remote / Texas - Remote"),
+            ("sf2", "Georgia - Remote"),
+            ("sf3", "District of Columbia - Washington / Virginia - Remote / Georgia - Atlanta"),
+        ):
+            job = _job(
+                self.company,
+                title=f"Salesforce {ext}",
+                location="placeholder",
+                location_country="USA",
+                platform="workday",
+                external_job_id=ext,
+            )
+            Job.objects.filter(pk=job.pk).update(
+                location=loc, location_country="Georgia", location_region=None
+            )
+        cloud = _job(
+            self.company,
+            title="CloudLinux Multi",
+            location="placeholder",
+            location_country="Spain",
+            platform="workable",
+            external_job_id="cl1",
+        )
+        Job.objects.filter(pk=cloud.pk).update(
+            location="Remote · Warsaw, Poland / Madrid, Spain / Tbilisi, Tbilisi, Georgia",
+            location_country="Spain",
+        )
+        self.local_no_country = _job(
+            self.company,
+            title="Local Board No Country",
+            location="placeholder",
+            platform="myjobs.ge",
+            external_job_id="local-null",
+        )
+        Job.objects.filter(pk=self.local_no_country.pk).update(location=None, location_country=None)
+
+    def test_salesforce_and_multi_country_rows_not_in_country_results(self):
+        titles = self._titles("job_search", {"country": "Georgia"})
+        self.assertNotIn("Salesforce sf1", titles)
+        self.assertNotIn("Salesforce sf2", titles)
+        self.assertNotIn("Salesforce sf3", titles)
+        self.assertNotIn("CloudLinux Multi", titles)
+        self.assertIn("Local Board No Country", titles)
+        v1 = self._titles("job-list", {"country": "Georgia"})
+        self.assertFalse({"Salesforce sf1", "Salesforce sf2", "Salesforce sf3"} & v1)
+
+        state = self._titles("job_search", {"country": "Georgia (USA)"})
+        self.assertIn("Salesforce sf1", state)
+        self.assertIn("Salesforce sf2", state)
+        self.assertIn("Salesforce sf3", state)
 
     def _titles(self, url_name, params):
         response = self.client.get(reverse(url_name), params)
