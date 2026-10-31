@@ -361,94 +361,29 @@ def _extract_languages(description: str | None) -> list[str]:
     return found
 
 
-# --- Location: city (location field) + country ---
-_US_STATE_CODES = frozenset(
-    {
-        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
-    }
-)
-_CA_PROVINCE_CODES = frozenset(
-    {"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
-)
-
-
 def _parse_location_country(location: str | None) -> str | None:
-    if not location or not location.strip():
+    """Country parsed from a location string. Bare 'Georgia' is not a country."""
+    from .location_resolver import GEORGIA_AMBIGUOUS, resolve_location
+
+    if not location or not str(location).strip():
         return None
-    patterns = [
-        (r"\b(usa|united states|u\.s\.?|us\b)\b", "USA"),
-        (r"\b(uk|united kingdom|u\.k\.?|great britain)\b", "United Kingdom"),
-        (r"\b(germany|deutschland)\b", "Germany"),
-        (r"\b(france)\b", "France"),
-        (r"\b(netherlands|holland)\b", "Netherlands"),
-        (r"\b(canada)\b", "Canada"),
-        (r"\b(australia)\b", "Australia"),
-        (r"\b(ireland)\b", "Ireland"),
-        (r"\b(spain|spaña)\b", "Spain"),
-        (r"\b(poland)\b", "Poland"),
-        (r"\b(georgia)\b", "Georgia"),
-    ]
-    loc = location.strip()
-    for pattern, country in patterns:
-        if re.search(pattern, loc, re.IGNORECASE):
-            return country
-    # UK constituent countries (e.g. "London, England") — use last comma segment or whole
-    # string so "New England" never matches as a bare "England" tail.
-    tail = loc.rsplit(",", 1)[-1].strip() if "," in loc else loc
-    if re.fullmatch(r"(?i)england|scotland|wales|northern ireland", tail):
-        return "United Kingdom"
-    return None
+    resolved = resolve_location(location)
+    if resolved.georgia == GEORGIA_AMBIGUOUS:
+        return None
+    return resolved.country
 
 
-def parse_stored_location_fields(raw: str | None) -> tuple[str | None, str | None]:
+def parse_stored_location_fields(raw: str | None, **kwargs) -> tuple[str | None, str | None]:
     """
     Turn feed-style locations into DB fields: location (city/primary site) and country.
 
     Multi-site strings (e.g. "Chicago, IL; New York, NY") use the first segment for
     city/country so country filters and API `city`/`country` stay populated.
+    Georgia the U.S. state and Georgia the country are resolved separately.
     """
-    if raw is None:
-        return (None, None)
-    full = str(raw).strip()
-    if not full:
-        return (None, None)
+    from .location_resolver import parse_city_and_country
 
-    segments = [s.strip() for s in re.split(r"\s*;\s*", full) if s.strip()]
-    primary = segments[0] if segments else full
-
-    country = _parse_location_country(primary) or _parse_location_country(full)
-    if country is None:
-        m = re.search(r",\s*([A-Z]{2})\s*$", primary)
-        if m:
-            code = m.group(1)
-            if code in _US_STATE_CODES:
-                country = "USA"
-            elif code in _CA_PROVINCE_CODES:
-                country = "Canada"
-
-    location_out = primary
-    if country == "USA":
-        m = re.match(r"^(.+?),\s*([A-Z]{2})\s*$", primary)
-        if m and m.group(2) in _US_STATE_CODES:
-            location_out = m.group(1).strip()
-    elif country == "Canada":
-        m = re.match(r"^(.+?),\s*([A-Z]{2})\s*$", primary)
-        if m and m.group(2) in _CA_PROVINCE_CODES:
-            location_out = m.group(1).strip()
-    elif country and "," in primary:
-        left, right = primary.rsplit(",", 1)
-        right_st = right.strip()
-        if _parse_location_country(right_st) == country:
-            location_out = left.strip()
-
-    if len(location_out) > 200:
-        location_out = location_out[:200]
-
-    return (location_out, country)
+    return parse_city_and_country(raw, **kwargs)
 
 
 # --- Data completeness score ---
@@ -487,18 +422,35 @@ def normalize_job_fields(
     description_raw: str | None = None,
     location: str | None = None,
     qualifications_text: str | None = None,
+    source_platform: str | None = None,
+    explicit_country: str | None = None,
+    stored_country: str | None = None,
 ) -> dict[str, Any]:
     """
     Produce all derived matching fields from title + descriptionRaw.
     Only regenerate when title or description_raw changed or derived fields are empty.
     Never invents values; unknown -> "unknown", missing numbers -> NULL.
     """
+    from .location_resolver import resolve_location
+
     desc = (description_raw or "") + "\n\n" + (qualifications_text or "")
     desc = desc.strip() or None
     combined = ((title or "") + "\n" + (desc or "")).strip()
 
-    loc_parsed, ctry_parsed = parse_stored_location_fields(location)
-    location_country_out = ctry_parsed or _parse_location_country(location)
+    resolved = resolve_location(
+        location,
+        explicit_country=explicit_country,
+        platform=source_platform,
+        context=description_raw,
+        stored_country=stored_country,
+    )
+    location_country_out = None if resolved.georgia == "ambiguous" else resolved.country
+    location_fields = {
+        "location_country": location_country_out,
+        "location_region": resolved.region,
+        "canonical_location": resolved.city,
+        "location_country_authoritative": resolved.country_authoritative,
+    }
 
     if not title and not desc:
         return {
@@ -513,9 +465,8 @@ def normalize_job_fields(
             "languages_required": [],
             "embedding_text": None,
             "data_completeness_score": 0,
-            "location_country": location_country_out,
-            "canonical_location": loc_parsed,
             "used_fallback_sectioning": True,
+            **location_fields,
         }
     skills_result = extract_skills(desc, title)
     work_mode = extract_work_mode(desc, title, location)
@@ -551,9 +502,8 @@ def normalize_job_fields(
         "languages_required": languages,
         "embedding_text": embedding_text,
         "data_completeness_score": score,
-        "location_country": location_country_out,
-        "canonical_location": loc_parsed,
         "used_fallback_sectioning": skills_result["usedFallbackSectioning"],
+        **location_fields,
     }
 
 

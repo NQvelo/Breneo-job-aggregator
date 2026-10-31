@@ -88,7 +88,7 @@ class JobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, Dynamic
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'company_logo', 'location', 'location_country', 'city', 'country',
+            'id', 'title', 'company', 'company_logo', 'location', 'location_country', 'location_region', 'city', 'country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required',
@@ -273,7 +273,7 @@ class NestedJobSerializer(JobApplyEligibilityMixin, JobCityCountryFieldsMixin, D
     class Meta:
         model = Job
         fields = [
-            'id', 'title', 'company', 'location', 'location_country', 'city', 'country',
+            'id', 'title', 'company', 'location', 'location_country', 'location_region', 'city', 'country',
             'workplace_type', 'work_mode', 'skills_required', 'skills_preferred', 'tech_stack', 'tech_stack_candidates',
             'seniority', 'role_category', 'min_years_experience', 'languages_required', 'industry_tags',
             'visa_sponsorship', 'work_authorization_required', 'data_completeness_score',
@@ -639,6 +639,7 @@ class JobApplicationJobSummarySerializer(
             "company_logo",
             "location",
             "location_country",
+            "location_region",
             "city",
             "country",
             "workplace_type",

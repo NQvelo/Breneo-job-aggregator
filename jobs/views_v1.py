@@ -6,6 +6,7 @@ from datetime import timedelta
 from .models import Job, Company, deadline_open_q
 from .serializers import NestedJobSerializer, JobSerializer
 from .query_parser import JobQueryParser, parse_query_to_search_params
+from .location_resolver import q_for_country_param, q_for_place_param
 
 class CustomPagination(pagination.PageNumberPagination):
     page_size = 20
@@ -70,13 +71,21 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         city = self.request.query_params.get('city')
         location = self.request.query_params.get('location')
         if city:
-            queryset = queryset.filter(location__icontains=city)
+            place_q = q_for_place_param(city)
+            if place_q is not None:
+                queryset = queryset.filter(place_q)
+            else:
+                queryset = queryset.filter(location__icontains=city)
         elif location:
-            queryset = queryset.filter(location__icontains=location)
+            place_q = q_for_place_param(location)
+            if place_q is not None:
+                queryset = queryset.filter(place_q)
+            else:
+                queryset = queryset.filter(location__icontains=location)
 
         country = self.request.query_params.get('country')
         if country:
-            queryset = queryset.filter(location_country__icontains=country)
+            queryset = queryset.filter(q_for_country_param(country))
 
         work_mode = self.request.query_params.get('work_mode')
         if work_mode:

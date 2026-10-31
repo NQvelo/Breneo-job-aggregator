@@ -262,35 +262,16 @@ def extract_min_years_experience(description: str | None, title: str | None) -> 
     return None
 
 
-# --- Location country ---
-_COUNTRY_PATTERNS = [
-    (r"\b(usa|united states|u\.s\.?|us\b)\b", "USA"),
-    (r"\b(uk|united kingdom|u\.k\.?|great britain)\b", "United Kingdom"),
-    (r"\b(germany|deutschland)\b", "Germany"),
-    (r"\b(france)\b", "France"),
-    (r"\b(netherlands|holland)\b", "Netherlands"),
-    (r"\b(canada)\b", "Canada"),
-    (r"\b(australia)\b", "Australia"),
-    (r"\b(ireland)\b", "Ireland"),
-    (r"\b(spain|spaña)\b", "Spain"),
-    (r"\b(poland)\b", "Poland"),
-    (r"\b(georgia)\b", "Georgia"),
-    (r"\b(remote)\b", None),  # Skip "remote" as country
-]
-
-
 def parse_location_country(location: str | None) -> str | None:
-    """Parse country from location string. Returns None if not found."""
+    """Parse country from location string. Bare 'Georgia' is not the country."""
+    from .location_resolver import GEORGIA_AMBIGUOUS, resolve_location
+
     if not location or not location.strip():
         return None
-    loc = location.strip()
-    for pattern, country in _COUNTRY_PATTERNS:
-        if country and re.search(pattern, loc, re.IGNORECASE):
-            return country
-    tail = loc.rsplit(",", 1)[-1].strip() if "," in loc else loc
-    if re.fullmatch(r"(?i)england|scotland|wales|northern ireland", tail):
-        return "United Kingdom"
-    return None
+    resolved = resolve_location(location)
+    if resolved.georgia == GEORGIA_AMBIGUOUS:
+        return None
+    return resolved.country
 
 
 # --- Embedding text ---

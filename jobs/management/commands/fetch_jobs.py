@@ -7,7 +7,8 @@ from django.conf import settings as django_settings
 from jobs.models import Company, Job, deadline_cutoff_ge
 from jobs.utils import parse_date, process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import parse_job_posting_for_db
-from jobs.job_normalizer import normalize_job_fields, parse_stored_location_fields
+from jobs.job_normalizer import normalize_job_fields
+from jobs.location_resolver import resolve_location
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
@@ -419,15 +420,20 @@ class Command(BaseCommand):
                     raw_posted = j.get("posted_at")
                     parsed_posted = parse_date(raw_posted) if raw_posted else None
                     raw_location = j.get("location")
-                    ploc, pcountry = parse_stored_location_fields(raw_location)
-                    # Fetcher may supply an explicit country (jobs.ge → Georgia)
+                    # Source country is evidence. It does not override a location that
+                    # is positively the U.S. state of Georgia (or another country).
                     explicit_country = (j.get("location_country") or "").strip() or None
-                    if explicit_country:
-                        pcountry = explicit_country
-                    # Georgian boards already return a clean city name (or None)
-                    if platform in LOCAL_GE_PLATFORMS:
-                        ploc = (raw_location or "").strip() or None
-                        pcountry = pcountry or "Georgia"
+                    resolved = resolve_location(
+                        raw_location,
+                        explicit_country=explicit_country,
+                        platform=platform,
+                        context=j.get("description"),
+                    )
+                    if resolved.city is not None:
+                        ploc = resolved.city
+                    else:
+                        ploc = (str(raw_location).strip() if raw_location else "") or None
+                    pcountry = resolved.country
 
                     job_company_obj = company_obj
                     if comp.get("dynamic_company"):
@@ -465,7 +471,10 @@ class Command(BaseCommand):
                         "is_active": True,
                         "last_seen_at": run_started_at,
                     }
-                    if pcountry is not None:
+                    if resolved.country_authoritative:
+                        defaults["location_country"] = resolved.country
+                        defaults["location_region"] = resolved.region
+                    elif pcountry is not None:
                         defaults["location_country"] = pcountry
                     if j.get("deadline"):
                         defaults["deadline"] = j["deadline"]
@@ -571,6 +580,8 @@ class Command(BaseCommand):
                                 description_raw=job_obj.description,
                                 location=raw_location or job_obj.location,
                                 qualifications_text=job_obj.qualifications,
+                                source_platform=platform,
+                                explicit_country=explicit_country,
                             )
                             norm_applied = True
                             job_obj.work_mode = norm.get("work_mode", "unknown")
@@ -586,7 +597,10 @@ class Command(BaseCommand):
                             job_obj.data_completeness_score = norm.get("data_completeness_score", 0)
                             if norm.get("canonical_location") is not None:
                                 job_obj.location = norm["canonical_location"]
-                            if norm.get("location_country") is not None:
+                            if norm.get("location_country_authoritative"):
+                                job_obj.location_country = norm.get("location_country")
+                                job_obj.location_region = norm.get("location_region")
+                            elif norm.get("location_country") is not None:
                                 job_obj.location_country = norm["location_country"]
                             job_obj.visa_sponsorship = extract_visa_sponsorship(job_obj.description) or "unknown"
                             job_obj.work_authorization_required = extract_work_authorization_required(job_obj.description) or "unknown"
@@ -600,7 +614,10 @@ class Command(BaseCommand):
                             ]
                             if norm.get("canonical_location") is not None:
                                 match_fields.append("location")
-                            if norm.get("location_country") is not None:
+                            if norm.get("location_country_authoritative"):
+                                match_fields.append("location_country")
+                                match_fields.append("location_region")
+                            elif norm.get("location_country") is not None:
                                 match_fields.append("location_country")
                             job_obj.save(update_fields=match_fields)
                         except Exception as e:

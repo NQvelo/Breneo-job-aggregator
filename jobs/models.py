@@ -358,6 +358,13 @@ class Job(models.Model):
         db_index=True,
         help_text="Country parsed from location for job-user matching",
     )
+    location_region = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="State or admin region parsed from location (U.S. state of Georgia is 'Georgia' with country USA)",
+    )
 
     # Workplace type: Remote, Hybrid, On-site (extracted from job info)
     workplace_type = models.CharField(
@@ -698,6 +705,26 @@ class Job(models.Model):
                 # If normalization fails, keep original string to avoid data loss
                 pass
 
+        # Location is resolved on every save so "Georgia" is not stored as one place.
+        try:
+            from .location_resolver import resolve_location
+
+            explicit = self.location_country if self.platform == "employer" else None
+            resolved = resolve_location(
+                self.location,
+                explicit_country=explicit,
+                platform=self.platform,
+                context=self.description,
+                stored_country=self.location_country,
+            )
+            if resolved.country_authoritative:
+                if resolved.city is not None:
+                    self.location = resolved.city
+                self.location_country = resolved.country
+                self.location_region = resolved.region
+        except Exception as e:
+            logger.warning(f"Location resolver failed: {e}")
+
         # Populate matching fields from title + description (catalog-based extraction)
         # Regenerate when title/description available and (new job OR derived fields empty)
         _should_normalize = self.title and (
@@ -714,6 +741,9 @@ class Job(models.Model):
                     description_raw=self.description,
                     location=self.location,
                     qualifications_text=self.qualifications,
+                    source_platform=self.platform,
+                    explicit_country=self.location_country if self.platform == "employer" else None,
+                    stored_country=self.location_country,
                 )
                 self.work_mode = norm.get("work_mode", "unknown")
                 self.seniority = norm.get("seniority", "unknown")
@@ -730,9 +760,13 @@ class Job(models.Model):
                 self.data_completeness_score = norm.get("data_completeness_score", 0)
                 if norm.get("canonical_location") is not None:
                     self.location = norm["canonical_location"]
-                _lc = norm.get("location_country")
-                if _lc is not None:
-                    self.location_country = _lc
+                if norm.get("location_country_authoritative"):
+                    self.location_country = norm.get("location_country")
+                    self.location_region = norm.get("location_region")
+                else:
+                    _lc = norm.get("location_country")
+                    if _lc is not None:
+                        self.location_country = _lc
                 # Keep visa/auth from matching_normalizer if needed (job_normalizer doesn't extract these)
                 from .matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
                 self.visa_sponsorship = extract_visa_sponsorship(self.description) or "unknown"

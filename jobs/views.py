@@ -29,6 +29,7 @@ from .serializers import (
 from .permissions import CanPostEmployerJob
 from .employer_jobs import create_employer_job, get_employer_job_or_none, update_employer_job
 from .gemini_job_parser import parse_job_description_with_gemini
+from .location_resolver import coalesce_georgia_filter_values, q_for_country_param, q_for_place_param
 
 
 def _to_employer_job_payload(data):
@@ -142,9 +143,9 @@ class JobSearchView(APIView):
         sort_order = request.query_params.get('sort', 'newest').strip().lower()
 
         # Multi-value filters (list of values; job matches if it matches ANY)
-        countries = _get_multi_value_param(request, 'country')
-        cities = _get_multi_value_param(request, 'city')
-        location_countries = _get_multi_value_param(request, 'location_country')
+        countries = coalesce_georgia_filter_values(_get_multi_value_param(request, 'country'))
+        cities = coalesce_georgia_filter_values(_get_multi_value_param(request, 'city'))
+        location_countries = coalesce_georgia_filter_values(_get_multi_value_param(request, 'location_country'))
         title_keywords = _get_multi_value_param(request, 'title')
         role_categories = _get_multi_value_param(request, 'role_category')
         work_modes = _get_multi_value_param(request, 'work_mode')
@@ -223,41 +224,28 @@ class JobSearchView(APIView):
                 title_kw_q |= Q(title__icontains=kw)
             jobs = jobs.filter(title_kw_q)
         
-        # Multi-value country filter (code or variations, e.g. us, uk)
-        country_variations = {
-            'us': ['usa', 'united states', 'united states of america', 'us'],
-            'uk': ['united kingdom', 'england', 'britain', 'uk'],
-            'ca': ['canada', 'ca'],
-            'de': ['germany', 'deutschland'],
-            'fr': ['france'],
-            'au': ['australia'],
-            'in': ['india'],
-            'nl': ['netherlands', 'holland'],
-        }
+        # Country codes and names. "Georgia" is the country; "Georgia (USA)" is the state.
         if countries:
             country_q = Q()
             for code in countries:
-                code = code.lower()
-                country_q |= Q(location__icontains=code)
-                country_q |= Q(location_country__icontains=code)
-                if code in country_variations:
-                    for v in country_variations[code]:
-                        country_q |= Q(location__icontains=v)
-                        country_q |= Q(location_country__icontains=v)
+                country_q |= q_for_country_param(code)
             jobs = jobs.filter(country_q)
 
-        # City: Job.location only (matches API `city`); does not touch location_country
+        # City: Job.location only, except Georgia selectors which use place resolution.
         if cities:
             city_q = Q()
             for c in cities:
-                city_q |= Q(location__icontains=c)
+                place_q = q_for_place_param(c)
+                if place_q is not None:
+                    city_q |= place_q
+                else:
+                    city_q |= Q(location__icontains=c)
             jobs = jobs.filter(city_q)
-        
-        # Multi-value location_country (exact names, e.g. USA, Germany)
+
         if location_countries:
             loc_q = Q()
             for loc in location_countries:
-                loc_q |= Q(location_country__icontains=loc)
+                loc_q |= q_for_country_param(loc)
             jobs = jobs.filter(loc_q)
         
         # Multi-value role_category
