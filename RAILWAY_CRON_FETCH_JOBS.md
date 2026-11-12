@@ -45,6 +45,8 @@ If a run is still active when the next one is due, Railway skips the new run.
 
 ## 3. What a run does
 
+0. Re-checks every stored, active international job against the location and role rules below and
+   hides the ones that fail (also available on its own: `python manage.py prune_international_jobs`).
 1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`).
    - **Georgian boards** (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge) are read from every board category that
      matches the role families below (category IDs are listed in `jobs/fetchers.py`). Onsite jobs in Georgia

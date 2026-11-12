@@ -39,6 +39,39 @@ def get_logo_url(company_name: str, size=101) -> str:
     return f"https://img.logo.dev/name/{safe_name}?token={LOGO_DEV_PUBLIC_KEY}&size={size}&retina=true"
 
 
+def hide_disallowed_international_jobs(is_location_ok=None) -> int:
+    """
+    Re-check every active international job against the location and role filters and hide the ones
+    that fail (e.g. "USA - Remote, TX"). Covers rows saved under older rules and sources whose feed
+    failed this run, which the per-feed "missing from feed" step does not touch.
+    """
+    is_location_ok = is_location_ok or is_international_listing_allowed
+    hide_ids = []
+    qs = (
+        Job.objects.filter(is_active=True)
+        .exclude(platform__in=LOCAL_GE_PLATFORMS)
+        .exclude(platform="employer")
+        .only("id", "title", "location", "location_country", "description", "workplace_type", "raw", "platform")
+    )
+    for job in qs.iterator(chunk_size=500):
+        raw = job.raw if isinstance(job.raw, dict) else {}
+        check = {
+            "platform": job.platform,
+            "title": job.title or "",
+            "location": job.location or "",
+            "location_country": job.location_country or "",
+            "description": job.description or "",
+            "workplace_type": job.workplace_type,
+            "raw": raw,
+            "applicant_location_requirements": raw.get("applicantLocationRequirements"),
+        }
+        if not is_location_ok(check) or not is_supported_role(check):
+            hide_ids.append(job.id)
+    if hide_ids:
+        Job.objects.filter(id__in=hide_ids).update(is_active=False)
+    return len(hide_ids)
+
+
 def _stored_detail_ids(platform: str) -> set:
     """External IDs already stored with a description, so the fetcher can skip their detail pages."""
     return set(
@@ -245,6 +278,13 @@ class Command(BaseCommand):
             logger.error(error_msg)
             sys.exit(1)
         
+        try:
+            hidden = hide_disallowed_international_jobs(is_remote_ok)
+            if hidden:
+                self.stdout.write(f"  ⊘ Hid {hidden} stored international job(s) that fail the location / role filter")
+        except Exception as e:
+            logger.exception("Failed to re-check stored international jobs: %s", e)
+
         run_started_at = timezone.now()
         total = 0
         errors = []

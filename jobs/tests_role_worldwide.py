@@ -120,6 +120,31 @@ class WorldwideDefaultTests(TestCase):
         self.assertFalse(old.is_active)
 
 
+USA_MULTI_SITE = (
+    "USA - Austin, TX / USA - Remote, WY / USA - Remote, WI / USA - Remote, WV / USA - Remote, WA / "
+    "USA - Remote, VA / USA - Remote, VT / USA - Remote, UT / USA - Remote, TX / USA - Remote, SC / USA - Remo"
+)
+
+
+class PruneStoredInternationalJobsTests(TestCase):
+    def test_usa_remote_rows_are_hidden_without_fetching(self):
+        company = Company.objects.create(name="Acme", platform="workday")
+        kept = Job.objects.create(title="Backend Engineer", company=company, platform="workday",
+                                  external_job_id="ok", location="Remote", workplace_type="Remote")
+        usa = Job.objects.create(title="Backend Engineer", company=company, platform="workday",
+                                 external_job_id="usa", location=USA_MULTI_SITE, workplace_type="Remote")
+        local = Job.objects.create(title="ბუღალტერი", company=company, platform="jobs.ge",
+                                   external_job_id="ge", location="Tbilisi")
+        out = StringIO()
+        call_command("prune_international_jobs", stdout=out)
+        for job in (kept, usa, local):
+            job.refresh_from_db()
+        self.assertFalse(usa.is_active)
+        self.assertTrue(kept.is_active)
+        self.assertTrue(local.is_active)
+        self.assertIn("Hid 1", out.getvalue())
+
+
 class InternationalLocationRuleTests(SimpleTestCase):
     def _allowed(self, location, description="", **extra):
         return is_international_listing_allowed(
@@ -134,7 +159,9 @@ class InternationalLocationRuleTests(SimpleTestCase):
 
     def test_remote_tied_to_a_place_is_dropped(self):
         for loc in ("Remote - US", "Remote, EMEA", "Remote (Canada)", "Remote - Kenya", "Remote - CET time zone",
-                    "Remote - Georgia, US", "Georgia - Atlanta Metro - Remote", "USA"):
+                    "Remote - Georgia, US", "Georgia - Atlanta Metro - Remote", "USA", USA_MULTI_SITE,
+                    "USA - Remote", "USA Remote", "Remote USA", "US Remote", "Remote (US)",
+                    "United States (Remote)", "Remote - Americas", "North America - Remote"):
             with self.subTest(loc=loc):
                 self.assertFalse(self._allowed(loc))
         self.assertFalse(self._allowed("Remote", location_country="United States"))
