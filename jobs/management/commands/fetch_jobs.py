@@ -13,6 +13,7 @@ from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_auth
 from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
 from jobs.remote_worldwide_filter import is_remote_listing, is_remote_worldwide_listing
+from jobs.role_categories import is_supported_role
 import logging
 import re
 import sys
@@ -34,68 +35,25 @@ def get_logo_url(company_name: str, size=101) -> str:
     return f"https://img.logo.dev/name/{safe_name}?token={LOGO_DEV_PUBLIC_KEY}&size={size}&retina=true"
 
 
-# Non–jobs.ge feeds: keep tech roles only (skip pure sales / ops / legal, etc.).
-_TECH_ROLE_TITLE = re.compile(
-    r"(?i)\b("
-    r"engineers?|engineering|developers?|software|programmers?|devops|sre|"
-    r"backend|front[\s\-]?end|full[\s\-]?stack|fullstack|"
-    r"data\s+(?:engineer|scientist|analyst)|machine\s+learning|ml\s+engineer|ai\s+engineer|"
-    r"qa|quality\s+assurance|test\s+engineer|automation|"
-    r"security\s+engineer|appsec|infosec|cyber|"
-    r"platform|cloud|infrastructure|sysadmin|system\s+admin|"
-    r"mobile|ios|android|react\s+native|flutter|"
-    r"designer|ui/?ux|product\s+designer|product\s+manager|technical\s+program|"
-    r"architect|cto|tech\s+lead|engineering\s+manager|"
-    r"analyst|scientist|research\s+engineer"
-    r")\b"
-)
-_NON_TECH_TITLE = re.compile(
-    r"(?i)\b("
-    r"account\s+executive|sales\s+(?:manager|director|rep|associate)|"
-    r"recruiter|talent\s+acquisition|customer\s+success|"
-    r"account\s+manager|marketing\s+manager|brand\s+manager|"
-    r"legal\s+counsel|attorney|paralegal|receptionist|"
-    r"office\s+manager|executive\s+assistant(?!\s+to\s+cto)|"
-    r"copywriter|content\s+writer|social\s+media\s+manager"
-    r")\b"
-)
+def _stored_detail_ids(platform: str) -> set:
+    """External IDs already stored with a description, so the fetcher can skip their detail pages."""
+    return set(
+        Job.objects.filter(platform=platform, external_job_id__isnull=False)
+        .exclude(description__isnull=True)
+        .exclude(description="")
+        .values_list("external_job_id", flat=True)
+    )
 
 
-def _is_tech_role_listing(job_dict: dict) -> bool:
-    """Heuristic title filter for ATS boards (not used for jobs.ge IT category)."""
-    title = (job_dict.get("title") or "").strip()
-    if not title:
-        return False
-    if _NON_TECH_TITLE.search(title):
-        return False
-    if _TECH_ROLE_TITLE.search(title):
-        return True
-    # Remotive / boards sometimes use stack names in the title
-    desc_head = (job_dict.get("description") or "")[:800].lower()
-    if any(
-        tok in title.lower() or tok in desc_head
-        for tok in (
-            "python", "javascript", "typescript", "golang", "rust", "java",
-            "kubernetes", "react", "node.js", "aws", "gcp", "azure",
-        )
-    ):
-        return True
-    return False
-
-
-# ATS boards. Non–jobs.ge saves require a remote role (region-limited allowed) + tech title.
+# International sources keep only remote jobs open worldwide, in one of the role
+# families in jobs/role_categories.py. Georgian boards are local and use their own categories.
 COMPANIES = [
-    # jobs.ge IT/Programming: local GE tech (no worldwide filter)
-    {
-        "name": "Jobs.ge IT",
-        "platform": "jobs.ge",
-        "url": "https://jobs.ge/?cid=6",
-        "dynamic_company": True,
-    },
-    # Other Georgian boards, IT category only. Listed after jobs.ge so cross-posted ads keep the jobs.ge copy.
-    {"name": "HR.ge IT", "platform": "hr.ge", "dynamic_company": True},
-    {"name": "MyJobs.ge IT", "platform": "myjobs.ge", "dynamic_company": True},
-    {"name": "jobs.ss.ge IT", "platform": "jobs.ss.ge", "dynamic_company": True},
+    # Georgian boards: categories matching the role families (fetchers.py). Onsite jobs in Georgia
+    # are kept. jobs.ge is listed first so an ad cross-posted on several boards keeps the jobs.ge copy.
+    {"name": "Jobs.ge", "platform": "jobs.ge", "dynamic_company": True},
+    {"name": "HR.ge", "platform": "hr.ge", "dynamic_company": True},
+    {"name": "MyJobs.ge", "platform": "myjobs.ge", "dynamic_company": True},
+    {"name": "jobs.ss.ge", "platform": "jobs.ss.ge", "dynamic_company": True},
     # Greenhouse Job Board API
     {"name": "Intercom", "platform": "greenhouse", "handle": "intercom"},
     {"name": "Figma", "platform": "greenhouse", "handle": "figma"},
@@ -146,8 +104,8 @@ COMPANIES = [
     {"name": "We Work Remotely", "platform": "weworkremotely", "dynamic_company": True},
 ]
 
-# Local Georgian boards: IT category already scopes them to tech, jobs are mostly onsite in Georgia,
-# so they skip the remote + English tech-title filters applied to international sources.
+# Local Georgian boards: their category IDs already scope the roles and jobs are mostly onsite in
+# Georgia, so they skip the worldwide-remote and English title filters applied to international sources.
 LOCAL_GE_PLATFORMS = frozenset({"jobs.ge", "hr.ge", "myjobs.ge", "jobs.ss.ge"})
 
 
@@ -238,19 +196,19 @@ class Command(BaseCommand):
             help="Delete all jobs before fetching (companies are kept).",
         )
         parser.add_argument(
-            "--remote-worldwide-only",
+            "--allow-region-remote",
             action="store_true",
             help=(
-                "Only keep non–jobs.ge jobs that are remote AND open worldwide. "
-                "Default keeps region-limited remote roles too. jobs.ge is never filtered this way."
+                "Also keep international remote jobs limited to a country or region (e.g. 'Remote - US'). "
+                "Default keeps only remote jobs open worldwide. Georgian boards are never filtered this way."
             ),
         )
 
     def handle(self, *args, **options):
         max_jobs = options.get("max_jobs")
         purge_jobs = options.get("purge_jobs")
-        remote_worldwide_only = options.get("remote_worldwide_only")
-        is_remote_ok = is_remote_worldwide_listing if remote_worldwide_only else is_remote_listing
+        allow_region_remote = options.get("allow_region_remote")
+        is_remote_ok = is_remote_listing if allow_region_remote else is_remote_worldwide_listing
         try:
             # Verify database connection
             from django.db import connection
@@ -266,9 +224,10 @@ class Command(BaseCommand):
                 )
                 logger.info("Purged all jobs before fetch (%s rows)", deleted)
             self.stdout.write(
-                "  Filter: non–jobs.ge → "
-                + ("remote+worldwide" if remote_worldwide_only else "remote (any region)")
-                + " + tech roles; Georgian boards (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge) → IT category"
+                "  Filter: international → "
+                + ("remote (any region)" if allow_region_remote else "remote, open worldwide")
+                + " + supported role families; Georgian boards (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge)"
+                + " → matching categories"
             )
             logger.info("Starting job fetch command")
             
@@ -361,12 +320,19 @@ class Command(BaseCommand):
                     jobs_data = fetcher(api_url, company_name, api_key=api_key) if api_url else []
                 elif platform == "jobs.ge":
                     jobs_data = fetcher(
-                        comp.get("url") or "https://jobs.ge/?cid=6",
+                        comp.get("url"),
                         company_name,
                         logo=company_logo,
                         limit=comp.get("limit"),
+                        known_ids=_stored_detail_ids(platform),
                     )
-                elif platform in ("hr.ge", "myjobs.ge", "jobs.ss.ge", "weworkremotely"):
+                elif platform == "hr.ge":
+                    jobs_data = fetcher(
+                        company_name=company_name,
+                        logo=company_logo,
+                        known_ids=_stored_detail_ids(platform),
+                    )
+                elif platform in ("myjobs.ge", "jobs.ss.ge", "weworkremotely"):
                     jobs_data = fetcher(company_name=company_name, logo=company_logo)
                 else:
                     jobs_data = fetcher(comp.get("url") or comp.get("handle"), company_name)
@@ -393,28 +359,30 @@ class Command(BaseCommand):
                         ext_id = str(ext_id).strip()[:255]
                     if not ext_id:
                         continue
-                    # Fetcher saw the listing but couldn't load its details: keep the stored row as is.
+                    # Georgian boards: keep local listings, but only the first copy of an ad
+                    # cross-posted on several of them. Other platforms: worldwide remote + role families.
+                    if platform in LOCAL_GE_PLATFORMS:
+                        if _LOCAL_NON_JOB_TITLE.search(j.get("title") or ""):
+                            continue
+                        if j.get("title"):
+                            local_key = _local_job_key(j)
+                            if local_owner.setdefault(local_key, platform) != platform:
+                                continue
+                    elif not j.get("seen_only"):
+                        if not is_remote_ok(j):
+                            continue
+                        if not is_supported_role(j):
+                            continue
+
+                    # Listed in the feed, but details were not loaded (already stored, over the
+                    # per-run cap, or the request failed): keep the stored row and mark it seen.
                     if j.get("seen_only"):
                         found_ids.add(ext_id)
-                        seen_update = {"last_seen_at": run_started_at}
+                        seen_update = {"last_seen_at": run_started_at, "is_active": True}
                         if j.get("deadline"):
                             seen_update["deadline"] = j["deadline"]
                         Job.objects.filter(platform=platform, external_job_id=ext_id).update(**seen_update)
                         continue
-
-                    # Georgian boards: keep local IT listings, but only the first copy of an ad
-                    # cross-posted on several of them. All other platforms: remote AND tech titles.
-                    if platform in LOCAL_GE_PLATFORMS:
-                        if _LOCAL_NON_JOB_TITLE.search(j.get("title") or ""):
-                            continue
-                        local_key = _local_job_key(j)
-                        if local_owner.setdefault(local_key, platform) != platform:
-                            continue
-                    else:
-                        if not is_remote_ok(j):
-                            continue
-                        if not _is_tech_role_listing(j):
-                            continue
 
                     # Parse posted_at only when fetcher provided it; avoid overwriting with None
                     raw_posted = j.get("posted_at")

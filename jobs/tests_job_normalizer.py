@@ -17,6 +17,52 @@ from jobs.job_normalizer import (
 )
 
 
+class TestAmbiguousSkillWords(unittest.TestCase):
+    def test_ai_is_not_illustrator(self):
+        r = extract_skills("We build AI agents. Experience with ai tooling is a plus.", "ML Engineer")
+        self.assertNotIn("Illustrator", r["techStack"])
+        r = extract_skills("Daily tools: Adobe Illustrator and Figma.", "Graphic Designer")
+        self.assertIn("Illustrator", r["techStack"])
+
+    def test_common_words_need_skill_casing(self):
+        text = (
+            "Go above and beyond for customers. Take a rest, keep notion of quality.\n"
+            "Cut us some slack. Our backend is written in Go, with REST APIs."
+        )
+        r = extract_skills(text, "Backend Engineer")
+        self.assertIn("Go", r["techStack"])
+        self.assertIn("REST", r["techStack"])
+        self.assertNotIn("Notion", r["techStack"])
+        self.assertNotIn("Slack", r["techStack"])
+        self.assertIn("Slack", extract_skills("We talk in Slack.", "Engineer")["techStack"])
+        r = extract_skills("Go above and beyond. Take some rest.", "Account Manager")
+        self.assertNotIn("Go", r["techStack"])
+        self.assertNotIn("REST", r["techStack"])
+
+    def test_single_letters_only_in_lists(self):
+        r = extract_skills("Strong R&D focus, C-level stakeholders, plan B.", "Analyst")
+        self.assertNotIn("R", r["techStack"])
+        self.assertNotIn("C", r["techStack"])
+        r = extract_skills("Requirements: Python, R, SQL and C", "Data Scientist")
+        self.assertIn("R", r["techStack"])
+        self.assertIn("C", r["techStack"])
+        r = extract_skills("Requirements: Java, C++, Go", "Engineer")
+        self.assertNotIn("C", r["techStack"])
+
+    def test_company_and_benefits_sections_are_ignored(self):
+        text = (
+            "About Acme\nOur customers connect GitHub and Jira with our platform.\n\n"
+            "Requirements\n- Python and PostgreSQL\n\n"
+            "Benefits\n- Free Notion and Figma licenses\n"
+        )
+        r = extract_skills(text, "Backend Engineer")
+        self.assertEqual(r["techStack"], ["PostgreSQL", "Python"])
+
+    def test_about_the_role_is_kept(self):
+        r = extract_skills("About the role\nYou will build services in Python.", "Engineer")
+        self.assertIn("Python", r["techStack"])
+
+
 # --- Skill extraction tests ---
 class TestSkillExtraction(unittest.TestCase):
     def test_dotnet_extraction(self):

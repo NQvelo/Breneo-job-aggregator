@@ -784,7 +784,12 @@ class Job(models.Model):
             wt = submitted.get("workplace_type")
             if wt:
                 self.workplace_type = wt
-        
+
+        # An AI summary made from the current title + description wins over the rule-based parsers above.
+        if self.platform != "employer":
+            from .ai_job_enrichment import reapply_ai_fields
+            reapply_ai_fields(self)
+
         super().save(*args, **kwargs)
 
 

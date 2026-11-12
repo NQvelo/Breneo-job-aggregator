@@ -484,7 +484,16 @@ JOBS_GE_HEADERS = {
     ),
     "Accept-Language": "ka,en;q=0.8",
 }
-JOBS_GE_IT_LIST_URL = "https://jobs.ge/?cid=6"  # IT / Programming (full category, single page)
+JOBS_GE_IT_LIST_URL = "https://jobs.ge/?cid=6"  # IT / Programming
+# jobs.ge categories matching the role families in jobs/role_categories.py:
+# 1 administration/management, 2 sales, 3 finance, 4 PR/marketing, 6 IT, 8 medicine,
+# 11 construction, 12 education, 13 media, 18 general technical staff.
+# Left out: 5 logistics/drivers, 7 legal, 9 other, 10 food, 14 beauty, 16 cleaning, 17 security.
+JOBS_GE_CATEGORY_IDS = (1, 2, 3, 4, 6, 8, 11, 12, 13, 18)
+JOBS_GE_CATEGORY_URL = "https://jobs.ge/?page={page}&cid={cid}"
+JOBS_GE_MAX_PAGES = 30
+# Each detail page costs JOBS_GE_CRAWL_DELAY seconds; listings past the cap are fetched on later runs.
+JOBS_GE_MAX_DETAIL_FETCHES = 600
 JOBS_GE_ENGLISH_STUB_MARKER = "იხილეთ ამ განცხადების სრული ტექსტი ინგლისურ ენაზე"
 # Postings that only say "open this link for details" — no real duties/requirements on jobs.ge.
 _JOBS_GE_EXTERNAL_DETAIL_PHRASES = (
@@ -950,44 +959,83 @@ def _jobs_ge_parse_listing(soup: BeautifulSoup):
     return listings
 
 
+def _jobs_ge_collect_listings(list_url=None):
+    """
+    Listing rows from one jobs.ge page (list_url), or from every page of each category in
+    JOBS_GE_CATEGORY_IDS. Category pages repeat the VIP rows, so paging stops at the first
+    page without new IDs.
+    """
+    if list_url:
+        if not robots_allowed(list_url):
+            logger.warning("Scraping disallowed by robots.txt: %s", list_url)
+            return []
+        r = _jobs_ge_get(list_url)
+        return _jobs_ge_parse_listing(BeautifulSoup(r.content, "html.parser"))
+
+    listings = []
+    seen = set()
+    for cid in JOBS_GE_CATEGORY_IDS:
+        for page in range(1, JOBS_GE_MAX_PAGES + 1):
+            url = JOBS_GE_CATEGORY_URL.format(page=page, cid=cid)
+            if page == 1 and not robots_allowed(url):
+                logger.warning("Scraping disallowed by robots.txt: %s", url)
+                break
+            r = _jobs_ge_get(url)
+            new_rows = [
+                row for row in _jobs_ge_parse_listing(BeautifulSoup(r.content, "html.parser"))
+                if row["external_job_id"] not in seen
+            ]
+            if not new_rows:
+                break
+            seen.update(row["external_job_id"] for row in new_rows)
+            listings.extend(new_rows)
+    return listings
+
+
 def fetch_jobs_ge_listings(
     list_url=None,
-    company_name="Jobs.ge IT",
+    company_name="Jobs.ge",
     logo=None,
     limit=None,
+    known_ids=None,
+    max_detail_fetches=JOBS_GE_MAX_DETAIL_FETCHES,
 ):
     """
-    Fetch every tech (IT/Programming, cid=6) job from jobs.ge.
+    Fetch jobs.ge listings from the categories in JOBS_GE_CATEGORY_IDS (or one page, list_url).
 
-    For each listing, opens the detail page and extracts:
+    For each new listing, opens the detail page and extracts:
     - apply_url: real registration / application link when present
     - apply_email: HR email when the posting asks to email a CV
     Skips English-only stubs and thin ads that only link out for details
     (no responsibilities/qualifications content on the page).
+
+    Listings in known_ids (already stored with details) and listings past max_detail_fetches
+    are returned as seen_only items, so stored copies stay active without a detail request.
     """
-    list_url = list_url or JOBS_GE_IT_LIST_URL
     logo = logo or get_logo_url(company_name)
+    known_ids = {str(i) for i in (known_ids or ())}
     jobs = []
     try:
-        if not robots_allowed(list_url):
-            logger.warning("Scraping disallowed by robots.txt: %s", list_url)
-            return jobs
-
-        r = _jobs_ge_get(list_url)
-        soup = BeautifulSoup(r.content, "html.parser")
-        listings = _jobs_ge_parse_listing(soup)
+        listings = _jobs_ge_collect_listings(list_url)
         if limit is not None:
             listings = listings[:limit]
 
-        logger.info("jobs.ge: found %s IT listings at %s", len(listings), list_url)
+        logger.info("jobs.ge: found %s listings (%s already stored)", len(listings),
+                    sum(1 for i in listings if i["external_job_id"] in known_ids))
         skipped_thin = 0
         skipped_english = 0
+        detail_fetches = 0
 
         blocked = False
         for item in listings:
             detail_url = item["detail_url"]
             detail_r = None
-            if not blocked:
+            skip_detail = (
+                item["external_job_id"] in known_ids
+                or (max_detail_fetches is not None and detail_fetches >= max_detail_fetches)
+            )
+            if not blocked and not skip_detail:
+                detail_fetches += 1
                 try:
                     detail_r = _jobs_ge_get(detail_url)
                 except JobsGeBlocked as e:
@@ -996,9 +1044,11 @@ def fetch_jobs_ge_listings(
                 except Exception as e:
                     logger.warning("jobs.ge: failed to fetch detail %s: %s", detail_url, e)
             if detail_r is None:
-                # Still listed on jobs.ge: keep the stored copy active instead of hiding it.
+                # Still listed on jobs.ge: keep any stored copy active instead of hiding it.
                 jobs.append({
                     "external_job_id": item["external_job_id"],
+                    "title": item["title"],
+                    "company": (item.get("company") or company_name).strip() or company_name,
                     "platform": "jobs.ge",
                     "deadline": _jobs_ge_parse_deadline(item.get("deadline")),
                     "seen_only": True,
@@ -1069,7 +1119,7 @@ def fetch_jobs_ge_listings(
             })
 
         logger.info(
-            "jobs.ge: kept %s jobs (detail fetch failed=%s, skipped thin=%s, english_stub=%s) from %s listings",
+            "jobs.ge: kept %s jobs (no detail fetch=%s, skipped thin=%s, english_stub=%s) from %s listings",
             sum(1 for j in jobs if not j.get("seen_only")),
             sum(1 for j in jobs if j.get("seen_only")),
             skipped_thin,
@@ -1465,15 +1515,36 @@ def fetch_weworkremotely(feed_urls=None, company_name="We Work Remotely", logo=N
 
 HR_GE_API = "https://api.p.hr.ge/public-portal/tenant/1/api/v3"
 HR_GE_IT_SPECIALIZATION = "738"
+# hr.ge specializations matching the role families in jobs/role_categories.py:
+# 712 education/social/NGO, 713 finance, 715 technicians/trades, 716 HR, 717 marketing,
+# 722 media/design, 725 quality/safety, 726 procurement, 728 construction/architecture,
+# 729 medicine, 730 banking, 731 education/science, 732 insurance, 733 administration/office,
+# 734 engineering, 738 IT, 739 sales/customer service, 740 energy/technical.
+# Left out: 714 logistics/drivers, 718 gambling, 721 agriculture, 724 sport, 727 hospitality,
+# 735 legal, 736 auto, 737 beauty, 741 security.
+HR_GE_SPECIALIZATION_CODES = (
+    "712", "713", "715", "716", "717", "722", "725", "726", "728",
+    "729", "730", "731", "732", "733", "734", "738", "739", "740",
+)
 
 
-def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge", logo=None) -> list:
+def fetch_hr_ge(
+    specialization_codes=HR_GE_SPECIALIZATION_CODES,
+    company_name="HR.ge",
+    logo=None,
+    known_ids=None,
+) -> list:
     """
-    hr.ge public portal API. Lists one specialization (738 = Information Technologies) and
-    opens each announcement for its description and application email / URL.
+    hr.ge public portal API. Lists the given specializations (one search, codes are OR-ed) and
+    opens each new announcement for its description and application email / URL. Announcements
+    in known_ids are returned as seen_only items without a detail request.
     """
     logo = logo or get_logo_url(company_name)
     headers = {**JOBS_GE_HEADERS, "Accept": "application/json", "Origin": "https://www.hr.ge"}
+    if isinstance(specialization_codes, (str, int)):
+        specialization_codes = [specialization_codes]
+    codes = [str(c) for c in specialization_codes]
+    known_ids = {str(i) for i in (known_ids or ())}
     page_size = 100
     jobs: list = []
     try:
@@ -1482,7 +1553,7 @@ def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge
         while True:
             r = httpx.post(
                 f"{HR_GE_API}/announcement-search",
-                json={"Start": start, "Limit": page_size, "SpecializationCodes": [specialization_code]},
+                json={"Start": start, "Limit": page_size, "SpecializationCodes": codes},
                 headers=headers,
                 timeout=25,
             )
@@ -1497,6 +1568,17 @@ def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge
         for item in items:
             ann_id = item.get("announcementId")
             if not ann_id:
+                continue
+            if str(ann_id) in known_ids:
+                jobs.append({
+                    "external_job_id": str(ann_id),
+                    "title": (item.get("title") or "").strip(),
+                    "company": ("" if item.get("isAnonymous") else (item.get("customerName") or "").strip())
+                    or company_name,
+                    "platform": "hr.ge",
+                    "deadline": _parse_deadline(item.get("deadlineDate")),
+                    "seen_only": True,
+                })
                 continue
             detail: dict = {}
             try:
@@ -1533,27 +1615,48 @@ def fetch_hr_ge(specialization_code=HR_GE_IT_SPECIALIZATION, company_name="HR.ge
                 "logo": item.get("logoFilename") or detail.get("customerLogoUrl") or get_logo_url(employer or company_name),
             })
     except Exception:
-        logger.exception("hr.ge fetch failed (specialization %s)", specialization_code)
+        logger.exception("hr.ge fetch failed (specializations %s)", ",".join(codes))
     return jobs
 
 
 MYJOBS_GE_API = "https://api.myjobs.ge/api/ka/public/vacancies/v2"
 MYJOBS_GE_IT_CATEGORY = 726
+# myjobs.ge categories matching the role families in jobs/role_categories.py:
+# 43 education, 59 HR, 77 marketing, 98 medicine, 160 media, 196 construction, 259 office,
+# 307 banking, 395 finance, 471 management, 540 sales/trade, 583 energy, 707 design, 726 IT,
+# 746 project management.
+# Left out: 1 legal, 15 hospitality, 146 aesthetics, 236 service staff, 283 transport, 357 tourism,
+# 379 sports, 435 agriculture, 501 arts, 525 NGO, 600 auto, 629 gambling, 655 security,
+# 757 logistics, 872 production.
+MYJOBS_GE_CATEGORY_IDS = (43, 59, 77, 98, 160, 196, 259, 307, 395, 471, 540, 583, 707, 726, 746)
 
 
-def fetch_myjobs_ge(category_id=MYJOBS_GE_IT_CATEGORY, company_name="MyJobs.ge", logo=None, max_pages=30) -> list:
-    """myjobs.ge public vacancies API, one category (726 = IT ტექნოლოგიები). The list already has descriptions."""
+def fetch_myjobs_ge(
+    category_ids=MYJOBS_GE_CATEGORY_IDS,
+    company_name="MyJobs.ge",
+    logo=None,
+    max_pages=150,
+) -> list:
+    """myjobs.ge public vacancies API for the given categories (OR-ed). The list already has descriptions."""
     logo = logo or get_logo_url(company_name)
     headers = {**JOBS_GE_HEADERS, "Accept": "application/json", "Origin": "https://www.myjobs.ge"}
+    if isinstance(category_ids, int):
+        category_ids = [category_ids]
+    wanted = {int(c) for c in category_ids}
+    categories_param = ",".join(str(c) for c in sorted(wanted))
     jobs: list = []
+    seen: set = set()
     try:
         for page in range(1, max_pages + 1):
-            r = httpx.get(MYJOBS_GE_API, params={"page": page, "categories": category_id}, headers=headers, timeout=25)
+            r = httpx.get(MYJOBS_GE_API, params={"page": page, "categories": categories_param}, headers=headers, timeout=25)
             r.raise_for_status()
             data = r.json()
             for v in data.get("data") or []:
-                if (v.get("category_data") or {}).get("id") != category_id:
+                if (v.get("category_data") or {}).get("id") not in wanted:
                     continue
+                if v.get("id") in seen:
+                    continue
+                seen.add(v.get("id"))
                 vid = v.get("id")
                 company = v.get("company") or {}
                 employer = (company.get("brand_name") or v.get("recruiter_company_name") or "").strip()
@@ -1587,27 +1690,37 @@ def fetch_myjobs_ge(category_id=MYJOBS_GE_IT_CATEGORY, company_name="MyJobs.ge",
             if not data.get("next_page_url"):
                 break
     except Exception:
-        logger.exception("myjobs.ge fetch failed (category %s)", category_id)
+        logger.exception("myjobs.ge fetch failed (categories %s)", categories_param)
     return jobs
 
 
 JOBS_SS_GE_IT_SPHERE = 68
-# jobs.ss.ge's IT sphere also holds printing / ATM / copier technician ads; keep real tech titles.
-_SS_GE_TECH_TITLE = re.compile(
-    r"(?i)(\bIT\b|\bაიტი|პროგრამ|დეველოპ|developer|engineer|ინჟინ|სისტემ|ქსელ|network|"
-    r"ადმინისტრატორ|admin|მონაცემ|data|ანალიტ|analyst|ტესტ|\bQA\b|devops|კიბერ|security|"
-    r"web|ვებ|დიზაინ|design|1C|ERP|SAP|helpdesk|ჰელპდესკ|support)"
-)
+# jobs.ss.ge spheres matching the role families in jobs/role_categories.py:
+# 47 construction, 48 technical services, 55 medicine/pharma, 59 office/admin, 63 finance,
+# 64 sales/retail, 65 banking, 67 medical engineering, 68 IT, 69 AML, 73 social media,
+# 74 media/journalism, 77 management/admin.
+# Left out: 4, 32 food, 41 beauty, 42 agriculture, 43 internships, 44 hospitality, 45 security,
+# 50 care, 52 other, 53 production, 57 drivers, 61 auto, 66 cleaning, 72 logistics, 75 art.
+JOBS_SS_GE_SPHERE_IDS = (47, 48, 55, 59, 63, 64, 65, 67, 68, 69, 73, 74, 77)
 
 
-def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", logo=None, max_pages=20) -> list:
+def fetch_jobs_ss_ge(
+    sphere_ids=JOBS_SS_GE_SPHERE_IDS,
+    company_name="jobs.ss.ge",
+    logo=None,
+    max_pages=60,
+) -> list:
     """
     jobs.ss.ge gateway API. Search needs the anonymous bearer token the site sets in the
     `ss-jobs-access-token` cookie on any page load.
     """
     logo = logo or get_logo_url(company_name)
+    if isinstance(sphere_ids, int):
+        sphere_ids = [sphere_ids]
+    sphere_ids = [int(s) for s in sphere_ids]
     page_size = 50
     jobs: list = []
+    seen: set = set()
     try:
         with httpx.Client(headers=JOBS_GE_HEADERS, follow_redirects=True, timeout=25) as client:
             client.get("https://jobs.ss.ge/ka")
@@ -1627,7 +1740,7 @@ def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", 
                     "https://jobs-gateway.ss.ge/Jobs/search",
                     json={
                         "currencyId": 1,
-                        "sphereId": [sphere_id],
+                        "sphereId": sphere_ids,
                         "withoutCv": None,
                         "onlyWithSalary": False,
                         "paging": {"limit": page_size, "offset": page},
@@ -1640,9 +1753,10 @@ def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", 
                 items = result.get("items") or []
                 for v in items:
                     title = ((v.get("title") or {}).get("ka") or (v.get("title") or {}).get("text") or "").strip()
-                    if not _SS_GE_TECH_TITLE.search(title):
-                        continue
                     vid = v.get("id")
+                    if not title or vid in seen:
+                        continue
+                    seen.add(vid)
                     page_url = f"https://jobs.ss.ge/ka/details/{v.get('seoTitle') or 'vacancy'}-{vid}"
                     city = ((v.get("address") or {}).get("city") or {}).get("ka")
                     employer = (v.get("publisherName") or "").strip()
@@ -1669,7 +1783,7 @@ def fetch_jobs_ss_ge(sphere_id=JOBS_SS_GE_IT_SPHERE, company_name="jobs.ss.ge", 
                 if len(items) < page_size or page * page_size >= int(result.get("totalCount") or 0):
                     break
     except Exception:
-        logger.exception("jobs.ss.ge fetch failed (sphere %s)", sphere_id)
+        logger.exception("jobs.ss.ge fetch failed (spheres %s)", sphere_ids)
     return jobs
 
 

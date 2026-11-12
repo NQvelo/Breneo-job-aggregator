@@ -313,12 +313,21 @@ SPECTACULAR_SETTINGS = {
     ],
 }
 
-# Gemini (employer job description parsing — backend only). Set the key in the environment, e.g.:
+# Gemini (employer job parsing and AI summaries of fetched jobs — backend only). Set the key in the
+# environment, e.g.:
 #   export GEMINI_API_KEY="your-key"          # local shell
-#   Railway/Render: add GEMINI_API_KEY in the service Variables / Secrets UI
-# Do not commit real keys into the repo.
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBHFY3nND2LGiqUgI3GxGCNFRh24gXCR8E").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
+#   Railway/Render: add GEMINI_API_KEY in the service Variables / Secrets UI (web and cron services)
+# Do not commit real keys into the repo. Without a key, AI features are skipped.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+# Model for summarizing fetched jobs (enrich_jobs_ai) when Groq's free quota is used up; defaults to GEMINI_MODEL.
+GEMINI_ENRICHMENT_MODEL = os.environ.get("GEMINI_ENRICHMENT_MODEL", "").strip() or None
+
+# AI summaries of fetched jobs (enrich_jobs_ai) try Groq first. GROQ_API_KEY is shared with the interview
+# simulator. Comma-separated free-tier chat models, rotated as each one hits its daily token limit.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_ENRICHMENT_MODELS = os.environ.get("GROQ_ENRICHMENT_MODELS", "").strip() or None
+GROQ_ENRICHMENT_TPM = os.environ.get("GROQ_ENRICHMENT_TPM", "").strip() or None
 GEMINI_TIMEOUT_SECONDS = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "90") or "90")
 
 # Mock interview simulator (Whisper + LLM). Keys are server-side only.

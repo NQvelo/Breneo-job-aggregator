@@ -20,7 +20,23 @@ _CATALOG_PATH = Path(__file__).parent / "data" / "skills_catalog.json"
 _SKILLS_CATALOG: list[dict] = []
 _SKILL_ALIAS_INDEX: dict[str, str] = {}  # alias_lower -> canonical
 _SKILL_CATEGORY_INDEX: dict[str, str] = {}  # canonical -> category
-_ALIAS_PATTERNS: list[tuple[str, str]] = []  # (escaped_pattern, canonical) sorted by length desc
+# (compiled pattern, canonical, match mode) sorted by alias length desc
+_ALIAS_PATTERNS: list[tuple[re.Pattern, str, str]] = []
+
+# Catalog aliases too short or too common to mean the skill in running text
+# ("AI" is not Illustrator, "PS" is not Photoshop).
+_IGNORED_ALIASES = frozenset({"ai", "ae", "ps", "xd", "np", "sh", "wp", "vb", "py", "eda", "asm"})
+# Skills whose name is also an ordinary word or a person's name. They only match with the
+# catalog's capitalization and not as the first word of a sentence ("Go above and beyond").
+_WORD_SKILLS = frozenset({
+    "Apache", "Assembly", "Astro", "Babel", "Bun", "Chai", "Chef", "Dart", "Echo", "Elixir", "Expo",
+    "Express", "Fiber", "Gin", "Go", "Hapi", "Helm", "Hive", "Julia", "Koa", "Lambda", "Less", "Locust",
+    "Loki", "Mocha", "Notion", "Oracle", "Parcel", "Pinecone", "Prefect", "Presto", "Prettier",
+    "Puppet", "REST", "Recoil", "Remix", "Ruby", "Rust", "Sinatra", "Sketch", "Slack", "Snowflake",
+    "Spark", "Spring", "Swift", "Tornado",
+})
+# Single-letter languages only count inside a list ("Python, R, SQL"), never in "R&D" or "C-level".
+_LETTER_SKILLS = frozenset({"R", "C"})
 
 
 def _load_catalog() -> None:
@@ -36,21 +52,62 @@ def _load_catalog() -> None:
             alias_lower = alias.lower().strip()
             if alias_lower and alias_lower not in _SKILL_ALIAS_INDEX:
                 _SKILL_ALIAS_INDEX[alias_lower] = canonical
-    # Build patterns: (pattern, canonical), longest alias first for C vs C++ vs C#
-    pattern_tuples: list[tuple[str, str, int]] = []
+    # Longest alias first for C vs C++ vs C#
+    pattern_tuples: list[tuple[re.Pattern, str, str, int]] = []
     for entry in _SKILLS_CATALOG:
         canonical = entry["canonical"]
-        for alias in entry.get("aliases", []) + [canonical]:
+        for alias in set(entry.get("aliases", []) + [canonical]):
             alias = alias.strip()
-            if not alias:
+            if not alias or alias.lower() in _IGNORED_ALIASES:
                 continue
-            escaped = re.escape(alias)
-            # Word boundaries; allow . after (e.g. "Go.") by not excluding it from lookahead
-            # Word boundaries; don't exclude period so "Go." and "Node.js" match
-            pattern = r"(?<![a-zA-Z0-9_\-])" + escaped + r"(?![a-zA-Z0-9_\-])"
-            pattern_tuples.append((pattern, canonical, len(alias)))
-    pattern_tuples.sort(key=lambda x: -x[2])
-    _ALIAS_PATTERNS = [(p, c) for p, c, _ in pattern_tuples]
+            if canonical in _LETTER_SKILLS:
+                mode, flags, alias = "letter", 0, canonical
+            elif canonical in _WORD_SKILLS and alias.lower() == canonical.lower():
+                mode, flags, alias = "word", 0, canonical
+            else:
+                mode, flags = "any", re.IGNORECASE
+            # Don't exclude a trailing period so "Go." and "Node.js" match
+            pattern = r"(?<![a-zA-Z0-9_\-])" + re.escape(alias) + r"(?![a-zA-Z0-9_\-])"
+            pattern_tuples.append((re.compile(pattern, flags), canonical, mode, len(alias)))
+    pattern_tuples.sort(key=lambda x: -x[3])
+    seen: set[tuple[str, int]] = set()
+    _ALIAS_PATTERNS = []
+    for compiled, canonical, mode, _ in pattern_tuples:
+        if (compiled.pattern, compiled.flags) not in seen:
+            seen.add((compiled.pattern, compiled.flags))
+            _ALIAS_PATTERNS.append((compiled, canonical, mode))
+
+
+def _starts_sentence(text: str, start: int) -> bool:
+    before = text[:start].rstrip(" \t")
+    return not before or before[-1] in ".!?\n•*-–"
+
+
+def _in_list_context(text: str, start: int, end: int) -> bool:
+    before = text[:start].rstrip(" \t")
+    after = text[end:].lstrip(" \t")
+    if before and before[-1] in ",/(:":
+        return True
+    if after and after[0] in ",/)":
+        return True
+    return bool(re.search(r"(?:\band|\bor)$", before)) and bool(re.match(r"(?:$|[\s,.;)])", after))
+
+
+_SKILL_FOLLOWER = re.compile(
+    r"\s*(?:[,/(]|(?:or|and)\b|(?:experience|developers?|engineers?|programming|knowledge|skills?)\b)",
+    re.IGNORECASE,
+)
+
+
+def _alias_matches(compiled: re.Pattern, mode: str, text: str) -> bool:
+    for m in compiled.finditer(text):
+        if mode == "any":
+            return True
+        if mode == "word" and (not _starts_sentence(text, m.start()) or _SKILL_FOLLOWER.match(text, m.end())):
+            return True
+        if mode == "letter" and text[m.end():m.end() + 1] not in ("&", "'", "+", "#") and _in_list_context(text, m.start(), m.end()):
+            return True
+    return False
 
 
 def _ensure_catalog_loaded() -> None:
@@ -71,6 +128,14 @@ _TECH_HEADINGS = re.compile(
     r"^(?:(?:tech(?:nology)?|technologies)\s+stack|tools?|our\s+stack)\s*:?",
     re.IGNORECASE,
 )
+# Company / perks / legal sections: tools named there are not asked of the hire.
+_IGNORED_HEADINGS = re.compile(
+    r"^(?:about\b(?!\s+(?:the\s+|this\s+)?(?:role|position|job|opportunity|team|you)\b).{0,40}|who\s+we\s+are|our\s+(?:story|mission|company|values|culture)|"
+    r"(?:the\s+)?company|benefits|perks|what\s+we\s+offer|why\s+(?:join|work)\b.{0,40}|"
+    r"equal\s+(?:opportunity|employment)\b.{0,40}|eeo\b.{0,40}|compensation|salary|"
+    r"how\s+to\s+apply|application\s+process|our\s+(?:hiring|interview)\s+process)\s*:?\s*$",
+    re.IGNORECASE,
+)
 _SECTION_HEADING = re.compile(
     r"^(?:[A-Z][a-z\s\-]+|[\w\s]+)\s*:?\s*$",
     re.MULTILINE,
@@ -80,7 +145,7 @@ _SECTION_HEADING = re.compile(
 def _split_sections(text: str) -> list[tuple[str, str]]:
     """
     Split text into (section_type, body) pairs.
-    section_type: "must_have" | "preferred" | "tech" | "other"
+    section_type: "must_have" | "preferred" | "tech" | "ignore" | "other"
     """
     if not text or not text.strip():
         return []
@@ -96,7 +161,12 @@ def _split_sections(text: str) -> list[tuple[str, str]]:
             current_body.append(line)
             i += 1
             continue
-        if _MUST_HAVE_HEADINGS.match(stripped):
+        if _IGNORED_HEADINGS.match(stripped):
+            if current_body:
+                sections.append((current_type, "\n".join(current_body)))
+            current_type = "ignore"
+            current_body = []
+        elif _MUST_HAVE_HEADINGS.match(stripped):
             if current_body:
                 sections.append((current_type, "\n".join(current_body)))
             current_type = "must_have"
@@ -131,13 +201,11 @@ def _extract_skills_from_text(text: str, max_skills: int = 50) -> tuple[list[str
     _ensure_catalog_loaded()
     found: set[str] = set()
     candidates: set[str] = set()
-    text_lower = text.lower()
-    for pattern, canonical in _ALIAS_PATTERNS:
+    for compiled, canonical, mode in _ALIAS_PATTERNS:
         if len(found) >= max_skills:
             break
-        for m in re.finditer(pattern, text, re.IGNORECASE):
-            if canonical not in found:
-                found.add(canonical)
+        if canonical not in found and _alias_matches(compiled, mode, text):
+            found.add(canonical)
     # Tech-like candidates: CamelCase, foo.js, foo-js, etc. not in catalog
     tech_token = re.compile(
         r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+|[a-z]+[A-Z][a-z]*|[\w]+\.(?:js|ts|py|jsx|tsx|css)|[\w]+-[\w]+)\b"
@@ -182,6 +250,8 @@ def extract_skills(
         all_candidates.update(candidates)
     else:
         for section_type, body in sections:
+            if section_type == "ignore":
+                continue
             skills, candidates = _extract_skills_from_text(body)
             all_candidates.update(candidates)
             if section_type == "must_have":
