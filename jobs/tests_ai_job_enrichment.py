@@ -158,6 +158,33 @@ class GroqTests(_ProviderTestMixin, SimpleTestCase):
         ai.time.sleep.assert_any_call(3.0)
         self.assertEqual([c.kwargs["json"]["model"] for c in post.call_args_list], ["m1", "m1"])
 
+    def test_model_still_rate_limited_moves_to_next_model(self):
+        minute = _rate_limited("Rate limit reached on tokens per minute (TPM)")
+        with patch.object(ai.httpx, "post", side_effect=[minute] * 4 + [_groq_response(MODEL_OUTPUT)]) as post:
+            out = ai.summarize_job_with_ai("Engineer", DESCRIPTION)
+        self.assertEqual(out["_model"], "groq:m2")
+        self.assertEqual([c.kwargs["json"]["model"] for c in post.call_args_list], ["m1"] * 4 + ["m2"])
+
+    def test_every_model_rate_limited_is_temporary(self):
+        minute = _rate_limited("Rate limit reached on tokens per minute (TPM)")
+        with patch.object(ai.httpx, "post", side_effect=[minute] * 8):
+            with self.assertRaises(ai.AITemporaryError):
+                ai.summarize_job_with_ai("Engineer", DESCRIPTION)
+
+    @override_settings(GEMINI_API_KEY="gem-key", GEMINI_MODEL="gemini-test")
+    def test_rate_limited_groq_falls_back_to_gemini(self):
+        minute = _rate_limited("Rate limit reached on tokens per minute (TPM)")
+        with patch.object(ai.httpx, "post", side_effect=[minute] * 8 + [_gemini_response(MODEL_OUTPUT)]):
+            out = ai.summarize_job_with_ai("Engineer", DESCRIPTION)
+        self.assertEqual(out["_model"], "gemini:gemini-test")
+
+    def test_uses_token_limit_reported_by_groq(self):
+        resp = _groq_response(MODEL_OUTPUT)
+        resp.headers = {"x-ratelimit-limit-tokens": "6000"}
+        with patch.object(ai.httpx, "post", return_value=resp):
+            ai.summarize_job_with_ai("Engineer", DESCRIPTION)
+        self.assertEqual(ai._groq_pool().tpm["m1"], 6000)
+
     def test_all_models_out_raises_quota_exhausted(self):
         daily = _rate_limited("on requests per day (RPD)")
         with patch.object(ai.httpx, "post", side_effect=[daily, daily]):
@@ -289,6 +316,14 @@ class EnrichCommandTests(TestCase):
     @override_settings(GEMINI_API_KEY="")
     def test_without_key_does_nothing(self):
         self.assertIn("is set; skipping", self._run())
+
+    def test_rate_limited_job_is_postponed_without_counting_an_attempt(self):
+        target = "jobs.management.commands.enrich_jobs_ai.summarize_job_with_ai"
+        with patch(target, side_effect=ai.AITemporaryError("busy")):
+            out = self._run("--workers", "1")
+        self.assertIn("1 postponed", out)
+        self.job.refresh_from_db()
+        self.assertNotIn("ai_failed", self.job.structured_description or {})
 
     def test_gives_up_on_a_posting_after_repeated_failures(self):
         target = "jobs.management.commands.enrich_jobs_ai.summarize_job_with_ai"

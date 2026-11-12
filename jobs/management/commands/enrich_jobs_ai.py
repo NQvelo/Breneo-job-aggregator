@@ -7,6 +7,7 @@ from django.core.management.base import BaseCommand
 from jobs.ai_job_enrichment import (
     AI_FIELDS,
     AIQuotaExhausted,
+    AITemporaryError,
     ai_enrichment_enabled,
     ai_gave_up,
     apply_ai_result,
@@ -73,7 +74,7 @@ class Command(BaseCommand):
                     break
 
         self.stdout.write(f"AI summaries: {len(pending)} job(s) to process")
-        done = failed = consecutive_failures = 0
+        done = failed = busy = consecutive_failures = 0
         models: dict[str, int] = {}
         stop_reason = None
         pool = ThreadPoolExecutor(max_workers=max(1, options["workers"]))
@@ -85,6 +86,14 @@ class Command(BaseCommand):
                 except AIQuotaExhausted:
                     stop_reason = "free AI quota used up for today; the rest are done on the next run"
                     break
+                except AITemporaryError as e:
+                    logger.warning("AI job summary postponed for %r: %s", job.title, e)
+                    busy += 1
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        stop_reason = f"{consecutive_failures} calls failed in a row (rate limits / network)"
+                        break
+                    continue
                 if result is None:
                     failed += 1
                     consecutive_failures += 1
@@ -107,5 +116,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"  ⊘ Stopped: {stop_reason}"))
         by_model = ", ".join(f"{m}: {n}" for m, n in sorted(models.items())) or "none"
         self.stdout.write(self.style.SUCCESS(
-            f"  ✓ Summarized {done} job(s), {failed} failed, {len(pending) - done - failed} left (by model: {by_model})"
+            f"  ✓ Summarized {done} job(s), {failed} failed, {busy} postponed (rate limits / network), "
+            f"{len(pending) - done - failed - busy} left (by model: {by_model})"
         ))

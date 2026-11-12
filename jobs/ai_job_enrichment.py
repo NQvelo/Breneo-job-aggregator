@@ -115,7 +115,15 @@ class AIQuotaExhausted(Exception):
     """Every configured provider has used its daily budget (or none is configured)."""
 
 
+class AITemporaryError(Exception):
+    """Providers are rate limited or unreachable right now; the job is retried later without counting against it."""
+
+
 class _DailyLimit(Exception):
+    pass
+
+
+class _MinuteLimit(Exception):
     pass
 
 
@@ -205,7 +213,7 @@ class _GroqModelPool:
 
     def __init__(self, models: list[str], tpm: int):
         self.models = models
-        self.tpm = tpm
+        self.tpm = {m: tpm for m in models}
         self.lock = threading.Lock()
         self.usage: dict[str, deque] = {m: deque() for m in models}
         self.exhausted: set[str] = set()
@@ -216,18 +224,27 @@ class _GroqModelPool:
             q.popleft()
         return sum(n for _, n in q)
 
-    def acquire(self, tokens: int) -> str | None:
-        """Reserve tokens on a model, waiting for minute budget if needed. None when all are out for the day."""
-        tokens = min(tokens, self.tpm)
+    def set_limit(self, model: str, tpm: int) -> None:
+        """Use the per-minute token limit Groq reports for the model (it differs between models)."""
+        if tpm > 0:
+            with self.lock:
+                self.tpm[model] = tpm
+
+    def acquire(self, tokens: int, skip=()) -> str | None:
+        """
+        Reserve tokens on a model, waiting for minute budget if needed. None when every model not in
+        `skip` is out for the day.
+        """
         while True:
             with self.lock:
                 now = time.monotonic()
-                live = [m for m in self.models if m not in self.exhausted]
+                live = [m for m in self.models if m not in self.exhausted and m not in skip]
                 if not live:
                     return None
                 for m in live:
-                    if self._used(m, now) + tokens <= self.tpm:
-                        self.usage[m].append((now, tokens))
+                    need = min(tokens, self.tpm[m])
+                    if self._used(m, now) + need <= self.tpm[m]:
+                        self.usage[m].append((now, need))
                         return m
                 waits = [60 - (now - self.usage[m][0][0]) for m in live if self.usage[m]]
             time.sleep(max(0.5, min(waits or [1.0])))
@@ -235,8 +252,8 @@ class _GroqModelPool:
     def settle(self, model: str, reserved: int, actual: int | None) -> None:
         if actual is None:
             return
-        reserved = min(reserved, self.tpm)
         with self.lock:
+            reserved = min(reserved, self.tpm[model])
             q = self.usage[model]
             for i in range(len(q) - 1, -1, -1):
                 if q[i][1] == reserved:
@@ -282,7 +299,7 @@ def _strip_reasoning(text: str) -> str:
     return m.group(1).strip() if m else text
 
 
-def _groq_once(model: str, prompt: str) -> tuple[Any, int | None]:
+def _groq_once(model: str, prompt: str, pool: _GroqModelPool | None = None) -> tuple[Any, int | None]:
     payload: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -300,10 +317,15 @@ def _groq_once(model: str, prompt: str) -> tuple[Any, int | None]:
             json=payload,
             timeout=timeout,
         )
+        limit = r.headers.get("x-ratelimit-limit-tokens")
+        if pool is not None and isinstance(limit, str) and limit.isdigit():
+            pool.set_limit(model, int(limit))
         if r.status_code == 429:
             message = r.text.lower()
             if "per day" in message or "(tpd)" in message or "(rpd)" in message:
                 raise _DailyLimit(model)
+            if attempt == 3:
+                break
             time.sleep(min(float(r.headers.get("retry-after") or 5 * (attempt + 1)), 60))
             continue
         if r.status_code >= 500 and attempt < 3:
@@ -313,22 +335,32 @@ def _groq_once(model: str, prompt: str) -> tuple[Any, int | None]:
         data = r.json()
         content = data["choices"][0]["message"].get("content") or ""
         return json.loads(_strip_reasoning(content)), (data.get("usage") or {}).get("total_tokens")
-    raise httpx.HTTPError(f"Groq {model}: still rate limited after retries")
+    raise _MinuteLimit(model)
 
 
 def _call_groq(prompt: str) -> tuple[Any, str] | None:
-    """(parsed JSON, model) from the first Groq model with budget; None when all are out for the day."""
+    """
+    (parsed JSON, model) from the first Groq model with budget; None when all are out for the day.
+    Raises AITemporaryError when the models with budget left stay rate limited.
+    """
     pool = _groq_pool()
     reserved = estimate_tokens(prompt) + MAX_OUTPUT_TOKENS
+    busy: set[str] = set()
     while True:
-        model = pool.acquire(reserved)
+        model = pool.acquire(reserved, skip=busy)
         if model is None:
+            if busy:
+                raise AITemporaryError(f"Groq rate limited ({', '.join(sorted(busy))})")
             return None
         try:
-            data, used = _groq_once(model, prompt)
+            data, used = _groq_once(model, prompt, pool)
         except _DailyLimit:
             logger.info("Groq %s reached its daily limit; trying the next model", model)
             pool.mark_exhausted(model)
+            continue
+        except _MinuteLimit:
+            logger.info("Groq %s still rate limited; trying the next model", model)
+            busy.add(model)
             continue
         pool.settle(model, reserved, used)
         return data, f"groq:{model}"
@@ -367,14 +399,20 @@ def _call_gemini(prompt: str) -> tuple[Any, str] | None:
 
 
 def _generate(prompt: str) -> tuple[Any, str]:
+    busy = None
     if _groq_key():
-        out = _call_groq(prompt)
+        try:
+            out = _call_groq(prompt)
+        except AITemporaryError as e:
+            busy, out = e, None
         if out is not None:
             return out
     if _gemini_key():
         out = _call_gemini(prompt)
         if out is not None:
             return out
+    if busy is not None:
+        raise busy
     raise AIQuotaExhausted("No AI provider has budget left")
 
 
@@ -459,7 +497,8 @@ def validate_ai_result(data: Any, description: str, title: str = "") -> dict[str
 def summarize_job_with_ai(title: str | None, description: str | None) -> dict[str, Any] | None:
     """
     Summary, responsibilities, qualifications, skills and tools for one posting (plus "_model").
-    None when the call fails; raises AIQuotaExhausted when no provider has budget left.
+    None when the model's answer is unusable; raises AITemporaryError when providers are rate limited
+    or unreachable, and AIQuotaExhausted when no provider has budget left.
     """
     description = (description or "").strip()
     if not description:
@@ -471,8 +510,15 @@ def summarize_job_with_ai(title: str | None, description: str | None) -> dict[st
     prompt = _PROMPT.format(title=(title or "").strip(), description=posting)
     try:
         data, model = _generate(prompt)
-    except AIQuotaExhausted:
+    except (AIQuotaExhausted, AITemporaryError):
         raise
+    except httpx.TransportError as e:
+        raise AITemporaryError(str(e)) from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429 or e.response.status_code >= 500:
+            raise AITemporaryError(str(e)) from e
+        logger.warning("AI job summary failed for %r: %s", title, e)
+        return None
     except Exception as e:
         logger.warning("AI job summary failed for %r: %s", title, e)
         return None
