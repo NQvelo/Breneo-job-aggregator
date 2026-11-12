@@ -296,12 +296,22 @@ def _location_names_any_place(loc: str) -> bool:
     return any(w not in _NON_PLACE_WORDS for w in words)
 
 
+def _source_country(job_dict: dict[str, Any]) -> str | None:
+    """Country as reported by the source itself (Workday's posting country), else the job's country field."""
+    raw = job_dict.get("raw") if isinstance(job_dict.get("raw"), dict) else {}
+    info = raw.get("jobPostingInfo") if isinstance(raw.get("jobPostingInfo"), dict) else {}
+    country = info.get("country")
+    if isinstance(country, dict) and country.get("descriptor"):
+        return str(country["descriptor"]).strip()
+    return (job_dict.get("location_country") or "").strip() or None
+
+
 def is_georgia_location(job_dict: dict[str, Any]) -> bool:
     """True when the location (any of its sites) is in the country of Georgia, e.g. "Tbilisi, Georgia"."""
     from .location_resolver import resolve_location
 
     loc = (job_dict.get("location") or "").strip()
-    explicit = (job_dict.get("location_country") or "").strip() or None
+    explicit = _source_country(job_dict)
     desc = job_dict.get("description")
     sites = [s for s in re.split(r"\s*(?:\s/\s|;|\|)\s*", loc) if s.strip()] or [""]
     for site in sites:

@@ -37,6 +37,9 @@ class RoleFamilyTests(SimpleTestCase):
             "HVAC Technician": rc.ENGINEERING_TRADES,
             "Technical Writer": rc.WRITING_MEDIA,
             "Video Editor": rc.WRITING_MEDIA,
+            "GRC Analyst": rc.FINANCE_ACCOUNTING,
+            "Global Alliance Lead, Capgemini": rc.SALES_SUCCESS,
+            "Client Value Partner (CVP) - Utilities": rc.SALES_SUCCESS,
         }
         for title, family in cases.items():
             with self.subTest(title=title):
@@ -174,6 +177,11 @@ class InternationalLocationRuleTests(SimpleTestCase):
                 self.assertTrue(self._allowed(loc, workplace_type="Onsite"))
         self.assertTrue(self._allowed("", location_country="Georgia", workplace_type="Hybrid"))
         self.assertFalse(self._allowed("Atlanta, Georgia", workplace_type="Onsite"))
+        # Workday "State - Site" rows: older code stored location_country="Georgia" on them.
+        workday_raw = {"jobPostingInfo": {"country": {"descriptor": "United States of America"}}}
+        self.assertFalse(self._allowed("Georgia - Remote", location_country="Georgia", raw=workday_raw))
+        self.assertFalse(self._allowed("Georgia - Remote / Florida - Remote", location_country="Georgia",
+                                       raw=workday_raw))
         self.assertFalse(self._allowed("Berlin, Germany", workplace_type="Onsite"))
 
 

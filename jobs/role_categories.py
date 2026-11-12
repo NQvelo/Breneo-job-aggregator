@@ -119,6 +119,7 @@ _ROLE_FAMILIES: list[tuple[str, re.Pattern]] = [
             r"customer\s+success", r"client\s+success", r"partnerships?", r"partner\s+manager",
             r"key\s+account", r"revenue", r"inside\s+sales", r"pre[\s\-]?sales", r"solutions?\s+consultant",
             r"solutions?\s+engineer", r"sales\s+engineer", r"channel\s+manager", r"relationship\s+manager",
+            r"alliances?", r"client\s+(?:value\s+)?partner",
         ),
     ),
     (
@@ -128,6 +129,7 @@ _ROLE_FAMILIES: list[tuple[str, re.Pattern]] = [
             r"comptroller", r"cfo", r"tax", r"audit\w*", r"payroll", r"treasury", r"fp&a",
             r"billing", r"accounts\s+(?:payable|receivable)", r"credit\s+analyst", r"risk\s+analyst",
             r"investment", r"actuar\w*", r"underwrit\w*", r"compliance", r"aml", r"kyc",
+            r"grc", r"governance,?\s+risk", r"risk\s+(?:and|&)\s+compliance",
         ),
     ),
     (
