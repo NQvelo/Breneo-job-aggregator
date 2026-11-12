@@ -4,7 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -158,6 +158,7 @@ def _job(company, **kwargs):
     return Job.objects.create(**defaults)
 
 
+@override_settings(AI_ONLY_LISTINGS=False)
 class GeorgiaSearchFilterTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -413,7 +414,7 @@ class FetchGeorgiaLocationTests(TestCase):
         with patch.object(fetch_jobs_cmd, "COMPANIES", [source]), patch.dict(
             fetch_jobs_cmd.PLATFORM_TO_FETCHER, {"jobs.ge": lambda *args, **kwargs: feed}
         ):
-            call_command("fetch_jobs", stdout=StringIO())
+            call_command("fetch_jobs", "--no-ai-limit", stdout=StringIO())
 
         tbilisi = Job.objects.get(external_job_id="fetch-tb")
         atlanta = Job.objects.get(external_job_id="fetch-at")

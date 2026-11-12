@@ -1553,11 +1553,12 @@ def fetch_hr_ge(
     company_name="HR.ge",
     logo=None,
     known_ids=None,
+    max_detail_fetches=None,
 ) -> list:
     """
     hr.ge public portal API. Lists the given specializations (one search, codes are OR-ed) and
     opens each new announcement for its description and application email / URL. Announcements
-    in known_ids are returned as seen_only items without a detail request.
+    in known_ids or past max_detail_fetches are returned as seen_only items without a detail request.
     """
     logo = logo or get_logo_url(company_name)
     headers = {**JOBS_GE_HEADERS, "Accept": "application/json", "Origin": "https://www.hr.ge"}
@@ -1585,11 +1586,14 @@ def fetch_hr_ge(
             if not batch or start >= int(block.get("totalCount") or 0):
                 break
 
+        detail_fetches = 0
         for item in items:
             ann_id = item.get("announcementId")
             if not ann_id:
                 continue
-            if str(ann_id) in known_ids:
+            if str(ann_id) in known_ids or (
+                max_detail_fetches is not None and detail_fetches >= max_detail_fetches
+            ):
                 jobs.append({
                     "external_job_id": str(ann_id),
                     "title": (item.get("title") or "").strip(),
@@ -1601,6 +1605,7 @@ def fetch_hr_ge(
                 })
                 continue
             detail: dict = {}
+            detail_fetches += 1
             try:
                 dr = httpx.get(f"{HR_GE_API}/announcement/{ann_id}", headers=headers, timeout=20)
                 dr.raise_for_status()

@@ -37,6 +37,8 @@ Do **not** use the cron command as the web service start command.
    - `GEMINI_MODEL` / `GEMINI_ENRICHMENT_MODEL` (default `gemini-2.5-flash`).
    - `AI_MAX_INPUT_TOKENS` (posting text per job, default 1500), `AI_ENRICH_MAX_PER_RUN` (default 1500),
      `AI_ENRICH_WORKERS` (default 3 parallel requests).
+   - `AI_JOBS_PER_DAY` (default 200): how many jobs the AI can summarize a day; caps new jobs per run.
+   - `AI_ONLY_LISTINGS` (default 1; set it on the web service): `0` also lists jobs without an AI summary.
 5. Deploy. Then open the service → **Deployments** and check the logs of the next run.
 
 If a run is still active when the next one is due, Railway skips the new run.
@@ -47,7 +49,12 @@ If a run is still active when the next one is due, Railway skips the new run.
 
 0. Re-checks every stored, active international job against the location and role rules below and
    hides the ones that fail (also available on its own: `python manage.py prune_international_jobs`).
-1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`).
+1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`), adding at most
+   `AI_JOBS_PER_DAY` minus the jobs still waiting for an AI summary as **new** jobs, so the AI step can
+   summarize every one of them (no AI key → no new jobs). International sources go first; the Georgian
+   boards split what is left, and jobs.ge / hr.ge only open that many detail pages. New jobs over the
+   limit are left for later runs. Stored jobs are always refreshed. `--no-ai-limit` adds everything.
+   `python manage.py trim_ai_backlog [--delete]` deletes waiting jobs beyond the newest `AI_JOBS_PER_DAY`.
    - **Georgian boards** (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge) are read from every board category that
      matches the role families below (category IDs are listed in `jobs/fetchers.py`). Onsite jobs in Georgia
      are kept. An ad cross-posted on several boards is kept once, preferring jobs.ge.
@@ -76,7 +83,8 @@ If a run is still active when the next one is due, Railway skips the new run.
    concise responsibilities and qualifications, and the required / preferred skills and tools.
    Each skill must be quoted from the posting, so tools from the company blurb are not stored.
    The result is kept until the title or description changes, so each posting is summarized once;
-   `fetch_jobs` does not overwrite it. Jobs not summarized yet show the rule-based fields.
+   `fetch_jobs` does not overwrite it. The API lists a fetched job only once its summary for the current
+   text is stored (employer jobs always); a posting the AI fails on 3 times is not retried.
    - Providers: Groq's free models first, each paced to its 8K tokens/minute limit and set aside when it
      reaches its 200K tokens/day limit; then Gemini. A job is ~2.7K tokens, so Groq's free tier covers
      ~220 jobs a day and Gemini the rest. When both are used up the run stops and the remaining jobs

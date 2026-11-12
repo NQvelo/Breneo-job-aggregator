@@ -289,3 +289,81 @@ class EnrichCommandTests(TestCase):
     @override_settings(GEMINI_API_KEY="")
     def test_without_key_does_nothing(self):
         self.assertIn("is set; skipping", self._run())
+
+    def test_gives_up_on_a_posting_after_repeated_failures(self):
+        target = "jobs.management.commands.enrich_jobs_ai.summarize_job_with_ai"
+        with patch(target, return_value=None) as summarize:
+            for _ in range(ai.AI_MAX_ATTEMPTS + 1):
+                self._run("--workers", "1")
+        self.assertEqual(summarize.call_count, ai.AI_MAX_ATTEMPTS)
+        self.job.refresh_from_db()
+        self.assertTrue(ai.ai_gave_up(self.job))
+        self.assertFalse(Job.objects.filter(ai.ai_pending_q(), pk=self.job.pk).exists())
+
+
+class AIOnlyListingTests(TestCase):
+    """Fetched jobs are listed only once a summary for their current text is stored."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme", platform="greenhouse")
+        self.job = Job.objects.create(
+            title="Senior Backend Engineer", company=self.company, platform="greenhouse",
+            external_job_id="1", description=DESCRIPTION,
+        )
+        self.employer_job = Job.objects.create(
+            title="Employer Role", company=self.company, platform="employer",
+            external_job_id="e1", description=DESCRIPTION,
+        )
+
+    def _listed_ids(self):
+        from .models import visible_jobs_q
+
+        return set(Job.objects.filter(visible_jobs_q()).values_list("pk", flat=True))
+
+    def test_fetched_job_waits_for_summary_employer_job_does_not(self):
+        self.assertEqual(self._listed_ids(), {self.employer_job.pk})
+        self.assertTrue(Job.objects.filter(ai.ai_pending_q(), pk=self.job.pk).exists())
+        ai.apply_ai_result(self.job, ai.validate_ai_result(MODEL_OUTPUT, DESCRIPTION, self.job.title))
+        self.job.save()
+        self.assertEqual(self._listed_ids(), {self.job.pk, self.employer_job.pk})
+        self.assertFalse(Job.objects.filter(ai.ai_pending_q(), pk=self.job.pk).exists())
+
+    def test_changed_posting_is_hidden_until_summarized_again(self):
+        ai.apply_ai_result(self.job, ai.validate_ai_result(MODEL_OUTPUT, DESCRIPTION, self.job.title))
+        self.job.save()
+        self.job.description = DESCRIPTION + "\nNew: Go experience required."
+        self.job.save()
+        self.assertNotIn(self.job.pk, self._listed_ids())
+        self.assertTrue(Job.objects.filter(ai.ai_pending_q(), pk=self.job.pk).exists())
+
+    def test_v1_api_lists_only_summarized_jobs(self):
+        from django.urls import reverse
+
+        res = self.client.get(reverse("job-list"))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([j["id"] for j in res.data["results"]], [self.employer_job.pk])
+
+    def test_trim_backlog_keeps_newest_and_jobs_with_applications(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import JobApplication
+
+        now = timezone.now()
+        Job.objects.filter(pk=self.job.pk).update(posted_at=now - timedelta(days=9))
+        jobs = [
+            Job.objects.create(title=f"Engineer {i}", company=self.company, platform="greenhouse",
+                               external_job_id=f"n{i}", description=DESCRIPTION, posted_at=now - timedelta(days=i))
+            for i in range(3)
+        ]
+        JobApplication.objects.create(external_user_id="u1", job=self.job, applied_at=now)
+        call_command("trim_ai_backlog", "--keep", "2", stdout=StringIO())
+        self.assertEqual(Job.objects.count(), 5)  # dry run
+        call_command("trim_ai_backlog", "--keep", "2", "--delete", stdout=StringIO())
+        remaining = set(Job.objects.values_list("pk", flat=True))
+        self.assertEqual(remaining, {jobs[0].pk, jobs[1].pk, self.job.pk, self.employer_job.pk})
+
+    @override_settings(AI_ONLY_LISTINGS=False)
+    def test_switch_lists_every_job(self):
+        self.assertEqual(self._listed_ids(), {self.job.pk, self.employer_job.pk})

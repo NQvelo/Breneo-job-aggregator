@@ -23,8 +23,17 @@ def deadline_open_q(now=None):
     return Q(deadline__isnull=True) | Q(deadline__gte=deadline_cutoff_ge(now))
 
 
+def ai_ready_q():
+    """Fetched jobs are listed only once their AI summary is stored (AI_ONLY_LISTINGS=0 turns this off)."""
+    from django.conf import settings
+
+    if not getattr(settings, "AI_ONLY_LISTINGS", True):
+        return Q()
+    return Q(platform="employer") | Q(structured_description__has_key="ai")
+
+
 def visible_jobs_q(now=None):
-    return Q(is_active=True) & deadline_open_q(now)
+    return Q(is_active=True) & deadline_open_q(now) & ai_ready_q()
 
 # Matching field enums for job-user matching system
 WORK_MODE_CHOICES = [

@@ -328,6 +328,10 @@ GEMINI_ENRICHMENT_MODEL = os.environ.get("GEMINI_ENRICHMENT_MODEL", "").strip() 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_ENRICHMENT_MODELS = os.environ.get("GROQ_ENRICHMENT_MODELS", "").strip() or None
 GROQ_ENRICHMENT_TPM = os.environ.get("GROQ_ENRICHMENT_TPM", "").strip() or None
+# Fetched jobs appear in the API only after their AI summary is stored; fetch_jobs adds at most
+# AI_JOBS_PER_DAY new jobs a run minus the jobs still waiting for a summary.
+AI_ONLY_LISTINGS = os.environ.get("AI_ONLY_LISTINGS", "1").strip() != "0"
+AI_JOBS_PER_DAY = os.environ.get("AI_JOBS_PER_DAY", "").strip() or None
 GEMINI_TIMEOUT_SECONDS = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "90") or "90")
 
 # Mock interview simulator (Whisper + LLM). Keys are server-side only.

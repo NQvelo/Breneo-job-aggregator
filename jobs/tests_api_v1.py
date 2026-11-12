@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework import status
@@ -6,6 +6,7 @@ from .models import Job, Company
 from django.utils import timezone
 from datetime import timedelta
 
+@override_settings(AI_ONLY_LISTINGS=False)
 class APIV1TestCase(TestCase):
     def setUp(self):
         self.client = APIClient()

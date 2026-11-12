@@ -98,7 +98,7 @@ class WorldwideDefaultTests(TestCase):
         with patch.object(fetch_jobs_cmd, "COMPANIES", [INTL_SOURCE]), patch.dict(
             fetch_jobs_cmd.PLATFORM_TO_FETCHER, {"greenhouse": fake}
         ):
-            call_command("fetch_jobs", *args, stdout=StringIO())
+            call_command("fetch_jobs", "--no-ai-limit", *args, stdout=StringIO())
 
     def _active_ids(self):
         return set(Job.objects.filter(platform="greenhouse", is_active=True)

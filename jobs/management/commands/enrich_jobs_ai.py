@@ -8,8 +8,10 @@ from jobs.ai_job_enrichment import (
     AI_FIELDS,
     AIQuotaExhausted,
     ai_enrichment_enabled,
+    ai_gave_up,
     apply_ai_result,
     current_ai_result,
+    record_ai_failure,
     reset_provider_state,
     summarize_job_with_ai,
 )
@@ -65,7 +67,7 @@ class Command(BaseCommand):
         limit = max(0, options["limit"])
         pending = []
         for job in qs.iterator(chunk_size=500):
-            if options["force"] or current_ai_result(job) is None:
+            if options["force"] or (current_ai_result(job) is None and not ai_gave_up(job)):
                 pending.append(job)
                 if len(pending) >= limit:
                     break
@@ -86,6 +88,8 @@ class Command(BaseCommand):
                 if result is None:
                     failed += 1
                     consecutive_failures += 1
+                    record_ai_failure(job)
+                    Job.objects.filter(pk=job.pk).update(structured_description=job.structured_description)
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         stop_reason = f"{consecutive_failures} calls failed in a row (check API keys / models)"
                         break

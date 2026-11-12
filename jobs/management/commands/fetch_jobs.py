@@ -18,6 +18,7 @@ from jobs.remote_worldwide_filter import (
     is_remote_listing,
 )
 from jobs.role_categories import is_supported_role
+from jobs.ai_job_enrichment import ai_enrichment_enabled, ai_jobs_per_day, ai_pending_q
 import logging
 import re
 import sys
@@ -240,6 +241,14 @@ class Command(BaseCommand):
                 "Default keeps only remote jobs open worldwide. Georgian boards are never filtered this way."
             ),
         )
+        parser.add_argument(
+            "--no-ai-limit",
+            action="store_true",
+            help=(
+                "Add every new job. Default adds at most AI_JOBS_PER_DAY new jobs minus the jobs still "
+                "waiting for an AI summary, so enrich_jobs_ai can summarize all of them."
+            ),
+        )
 
     def handle(self, *args, **options):
         max_jobs = options.get("max_jobs")
@@ -285,18 +294,48 @@ class Command(BaseCommand):
         except Exception as e:
             logger.exception("Failed to re-check stored international jobs: %s", e)
 
+        # New jobs are capped to what the free AI quota can summarize today. International sources
+        # (a few new jobs a day) go first; the Georgian boards split what is left.
+        new_budget = None
+        if not options.get("no_ai_limit"):
+            ai_on = ai_enrichment_enabled()
+            capacity = ai_jobs_per_day() if ai_on else 0
+            waiting = Job.objects.filter(ai_pending_q()).count()
+            new_budget = max(0, capacity - waiting)
+            self.stdout.write(
+                f"  AI capacity: {capacity} job(s)/day, {waiting} waiting for a summary"
+                f" → up to {new_budget} new job(s) this run"
+            )
+            if not ai_on:
+                self.stdout.write(self.style.WARNING(
+                    "  ⚠ GROQ_API_KEY / GEMINI_API_KEY not set: no new jobs are added (stored jobs are still refreshed)"
+                ))
+
         run_started_at = timezone.now()
         total = 0
+        seen_total = 0
+        held_back_total = 0
         errors = []
         stop_fetching = False
         local_owner: dict = {}
+        companies = sorted(COMPANIES, key=lambda c: c.get("platform") in LOCAL_GE_PLATFORMS)
+        local_left = sum(1 for c in companies if c.get("platform") in LOCAL_GE_PLATFORMS)
 
-        for comp in COMPANIES:
+        for comp in companies:
             if stop_fetching:
                 break
             platform = comp.get("platform")
             company_name = comp.get("name")
             company_logo = get_logo_url(company_name)
+            if new_budget is None:
+                new_share = None
+            elif platform in LOCAL_GE_PLATFORMS:
+                new_share = new_budget // max(1, local_left)
+                local_left -= 1
+            else:
+                new_share = new_budget
+            # Boards that open a page per job stop once the share is covered (some pages are skipped as thin).
+            detail_cap = None if new_share is None else (2 * new_share + 5 if new_share else 0)
 
             # Ensure company exists before fetching jobs
             company_obj, created = Company.objects.get_or_create(
@@ -367,18 +406,21 @@ class Command(BaseCommand):
                     api_key = comp.get("api_key") or getattr(django_settings, "LINKEDIN_JOBS_API_KEY", None)
                     jobs_data = fetcher(api_url, company_name, api_key=api_key) if api_url else []
                 elif platform == "jobs.ge":
+                    cap = {} if detail_cap is None else {"max_detail_fetches": detail_cap}
                     jobs_data = fetcher(
                         comp.get("url"),
                         company_name,
                         logo=company_logo,
                         limit=comp.get("limit"),
                         known_ids=_stored_detail_ids(platform),
+                        **cap,
                     )
                 elif platform == "hr.ge":
                     jobs_data = fetcher(
                         company_name=company_name,
                         logo=company_logo,
                         known_ids=_stored_detail_ids(platform),
+                        max_detail_fetches=detail_cap,
                     )
                 elif platform in ("myjobs.ge", "jobs.ss.ge", "weworkremotely"):
                     jobs_data = fetcher(company_name=company_name, logo=company_logo)
@@ -397,6 +439,8 @@ class Command(BaseCommand):
 
             found_ids = set()
             company_job_count = 0
+            new_count = 0
+            skipped_new = 0
             company_complete = True
             n_feed = len(jobs_data)
             batch_size = 50
@@ -430,6 +474,15 @@ class Command(BaseCommand):
                         if j.get("deadline"):
                             seen_update["deadline"] = j["deadline"]
                         Job.objects.filter(platform=platform, external_job_id=ext_id).update(**seen_update)
+                        seen_total += 1
+                        continue
+
+                    is_new = (
+                        new_share is not None
+                        and not Job.objects.filter(platform=platform, external_job_id=ext_id).exists()
+                    )
+                    if is_new and new_count >= new_share:
+                        skipped_new += 1
                         continue
 
                     # Parse posted_at only when fetcher provided it; avoid overwriting with None
@@ -678,6 +731,8 @@ class Command(BaseCommand):
                     found_ids.add(ext_id)
                     total += 1
                     company_job_count += 1
+                    if is_new:
+                        new_count += 1
 
                     if max_jobs is not None and total >= max_jobs:
                         if idx + 1 < n_feed:
@@ -717,6 +772,11 @@ class Command(BaseCommand):
                 logger.exception(error_msg)
                 errors.append(error_msg)
 
+            if new_budget is not None:
+                new_budget = max(0, new_budget - new_count)
+            held_back_total += skipped_new
+            if skipped_new:
+                self.stdout.write(f"  ⊘ Left {skipped_new} new job(s) for a later run (AI daily capacity)")
             self.stdout.write(self.style.SUCCESS(f"  ✓ Fetched {company_job_count} jobs for {company_name}"))
 
         # Delete fetched jobs that have been missing from their feed for the whole grace period.
@@ -763,8 +823,11 @@ class Command(BaseCommand):
             for error in errors[:5]:  # Show first 5 errors
                 logger.error(error)
         
-        if total > 0:
-            self.stdout.write(self.style.SUCCESS(f"✓ Successfully fetched/updated {total} jobs"))
+        if total > 0 or seen_total > 0 or held_back_total > 0:
+            self.stdout.write(self.style.SUCCESS(
+                f"✓ Successfully fetched/updated {total} jobs ({seen_total} more still listed, unchanged;"
+                f" {held_back_total} new left for later runs)"
+            ))
             logger.info("Job fetch completed successfully. Total jobs: %d", total)
         else:
             logger.warning("Job fetch completed but no jobs were found/updated")

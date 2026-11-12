@@ -1,5 +1,5 @@
 """Tests for legacy search endpoint /api/search (multi-value filters, e.g. two countries)."""
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -46,6 +46,7 @@ class MultiValueParamTests(TestCase):
         self.assertEqual(result, ["us", "uk"])
 
 
+@override_settings(AI_ONLY_LISTINGS=False)
 class JobSearchTwoCountriesTests(TestCase):
     """Test /api/search with two countries returns jobs from both."""
 

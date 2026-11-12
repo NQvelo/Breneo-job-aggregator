@@ -146,6 +146,17 @@ def ai_enrichment_enabled() -> bool:
     return bool(_groq_key() or _gemini_key())
 
 
+# ~2.7K tokens per job against Groq's 200K tokens/day on each of the 3 default models is ~220 jobs;
+# 200 leaves headroom, and Gemini covers retries.
+DEFAULT_AI_JOBS_PER_DAY = 200
+# A posting the model keeps failing on (bad JSON, nothing verifiable) is not retried after this.
+AI_MAX_ATTEMPTS = 3
+
+
+def ai_jobs_per_day() -> int:
+    return max(0, int(_setting("AI_JOBS_PER_DAY", str(DEFAULT_AI_JOBS_PER_DAY))))
+
+
 # --- Token budgeting --------------------------------------------------------------------------
 
 _GEORGIAN = re.compile(r"[\u10a0-\u10ff]")
@@ -513,8 +524,47 @@ def apply_ai_result(job, result: dict[str, Any]) -> None:
         "enriched_at": timezone.now().isoformat(),
         "result": result,
     }
+    sd.pop("ai_failed", None)
     job.structured_description = sd
     _write_fields(job, result)
+
+
+def record_ai_failure(job) -> int:
+    """Count a failed AI attempt for the job's current text (does not save). Returns the attempt count."""
+    sd = job.structured_description if isinstance(job.structured_description, dict) else {}
+    fingerprint = description_fingerprint(job.title, job.description)
+    failed = sd.get("ai_failed") if isinstance(sd.get("ai_failed"), dict) else {}
+    attempts = (failed.get("attempts") or 0) + 1 if failed.get("fingerprint") == fingerprint else 1
+    sd["ai_failed"] = {"fingerprint": fingerprint, "attempts": attempts}
+    job.structured_description = sd
+    return attempts
+
+
+def ai_gave_up(job) -> bool:
+    sd = job.structured_description if isinstance(job.structured_description, dict) else {}
+    failed = sd.get("ai_failed") if isinstance(sd.get("ai_failed"), dict) else {}
+    return (
+        failed.get("fingerprint") == description_fingerprint(job.title, job.description)
+        and (failed.get("attempts") or 0) >= AI_MAX_ATTEMPTS
+    )
+
+
+def ai_pending_q():
+    """Active fetched jobs still waiting for an AI summary (the AI's backlog)."""
+    from django.db.models import Q
+
+    no_sd = Q(structured_description__isnull=True)
+    return (
+        Q(is_active=True)
+        & ~Q(platform="employer")
+        & Q(description__isnull=False) & ~Q(description="")
+        & (no_sd | ~Q(structured_description__has_key="ai"))
+        & (
+            no_sd
+            | Q(structured_description__ai_failed__isnull=True)
+            | Q(structured_description__ai_failed__attempts__lt=AI_MAX_ATTEMPTS)
+        )
+    )
 
 
 def current_ai_result(job) -> dict[str, Any] | None:
@@ -529,7 +579,16 @@ def current_ai_result(job) -> dict[str, Any] | None:
 
 
 def reapply_ai_fields(job) -> bool:
-    """Restore AI fields after rule-based parsers overwrote them (does not save)."""
+    """
+    Restore AI fields after rule-based parsers overwrote them (does not save). A result made from
+    an older title / description is dropped, so the job waits for a new summary.
+    """
+    sd = job.structured_description if isinstance(job.structured_description, dict) else None
+    fingerprint = description_fingerprint(job.title, job.description)
+    if sd is not None:
+        for key in ("ai", "ai_failed"):
+            if isinstance(sd.get(key), dict) and sd[key].get("fingerprint") != fingerprint:
+                sd.pop(key)
     result = current_ai_result(job)
     if result is None:
         return False

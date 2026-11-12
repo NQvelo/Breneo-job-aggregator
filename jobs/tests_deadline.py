@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from jobs.fetchers import GE_TZ, _jobs_ge_parse_deadline, _parse_deadline
 from jobs.models import Company, Job, visible_jobs_q
 
 
+@override_settings(AI_ONLY_LISTINGS=False)
 class JobDeadlineVisibilityTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Deadline Co")
