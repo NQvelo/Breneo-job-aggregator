@@ -281,6 +281,72 @@ def is_remote_listing(job_dict: dict[str, Any]) -> bool:
     )
 
 
+# Words a location line may contain and still not name a place ("Remote", "Fully remote (Global)").
+_NON_PLACE_WORDS = frozenset({
+    "remote", "remotely", "fully", "first", "friendly", "only", "position", "role", "job", "work",
+    "working", "from", "home", "wfh", "distributed", "telecommute", "anywhere", "worldwide", "world",
+    "wide", "global", "globally", "international", "internationally", "in", "the", "async", "team",
+    "any", "location", "locations", "country", "flexible", "or", "and", "opportunity",
+})
+
+
+def _location_names_any_place(loc: str) -> bool:
+    """True when the location line contains a word that is not remote / worldwide wording."""
+    words = re.findall(r"[^\W\d_]+", (loc or "").lower())
+    return any(w not in _NON_PLACE_WORDS for w in words)
+
+
+def is_georgia_location(job_dict: dict[str, Any]) -> bool:
+    """True when the location (any of its sites) is in the country of Georgia, e.g. "Tbilisi, Georgia"."""
+    from .location_resolver import resolve_location
+
+    loc = (job_dict.get("location") or "").strip()
+    explicit = (job_dict.get("location_country") or "").strip() or None
+    desc = job_dict.get("description")
+    sites = [s for s in re.split(r"\s*(?:\s/\s|;|\|)\s*", loc) if s.strip()] or [""]
+    for site in sites:
+        resolved = resolve_location(
+            site,
+            explicit_country=explicit if len(sites) == 1 else None,
+            platform=job_dict.get("platform"),
+            context=desc if isinstance(desc, str) else None,
+        )
+        if resolved.country == "Georgia" and resolved.georgia == "country":
+            return True
+    return False
+
+
+def is_international_listing_allowed(job_dict: dict[str, Any]) -> bool:
+    """
+    Keep a job from an international source when either:
+    1. its location is in Georgia (Tbilisi, Batumi, ..., any work mode), or
+    2. it is remote and not tied to a place: the location is "Remote", "Remote (Global)", "Worldwide",
+       "Anywhere" or empty, no country is given, and the posting does not require living or being
+       authorized to work in a specific country.
+    """
+    if is_georgia_location(job_dict):
+        return True
+
+    loc = (job_dict.get("location") or "").strip()
+    title = (job_dict.get("title") or "").strip()
+    desc = job_dict.get("description") or ""
+    desc_text = desc if isinstance(desc, str) else str(desc)
+    raw = job_dict.get("raw") if isinstance(job_dict.get("raw"), dict) else {}
+    workplace_type = job_dict.get("workplace_type") or raw.get("workplaceType") or raw.get("workplace_type")
+    wt = workplace_type if isinstance(workplace_type, str) else None
+    loc_country = (job_dict.get("location_country") or "").strip()
+
+    if not _is_remote_role(loc, title, desc_text, wt):
+        return False
+    if _location_names_any_place(loc) or _location_names_specific_geo(loc):
+        return False
+    if loc_country and loc_country.lower() not in _WORLDWIDE_REQUIREMENT_NAMES:
+        return False
+    if _structured_requirements_block_worldwide(job_dict):
+        return False
+    return not _has_geo_lock(loc, desc_text)
+
+
 def is_remote_worldwide_listing(job_dict: dict[str, Any]) -> bool:
     """
     Return True only for remote roles that look open to applicants worldwide.

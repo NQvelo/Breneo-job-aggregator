@@ -169,7 +169,7 @@ def fetch_workable(company_slug, company_name, logo=None, *, remote_only=True):
     """
     Workable public careers API (apply.workable.com/{slug}).
 
-    remote_only: skip onsite/hybrid postings before fetching details.
+    remote_only: skip onsite/hybrid postings before fetching details, except those in Georgia.
     """
     logo = logo or get_logo_url(company_name)
     base = "https://apply.workable.com/api"
@@ -197,7 +197,7 @@ def fetch_workable(company_slug, company_name, logo=None, *, remote_only=True):
                 continue
             workplace = (item.get("workplace") or "").lower()
             is_remote = bool(item.get("remote")) or workplace == "remote"
-            if remote_only and not is_remote:
+            if remote_only and not is_remote and not _GEORGIA_HINT_RE.search(_workable_location_text(item)):
                 continue
 
             detail = {}
@@ -233,6 +233,8 @@ _WORKDAY_BOARD_RE = re.compile(
     r"https?://(?P<tenant>[\w-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?(?P<site>[^/?#]+)"
 )
 _REMOTE_HINT_RE = re.compile(r"(?i)\b(remote|anywhere|worldwide|distributed|work from home)\b")
+# International jobs located in Georgia are kept in any work mode (fetch_jobs decides country vs. U.S. state).
+_GEORGIA_HINT_RE = re.compile(r"(?i)\b(tbilisi|batumi|kutaisi|georgia)\b")
 
 
 def _workday_request(method, url, *, retries=8, pause=0.3, **kwargs):
@@ -251,8 +253,8 @@ def fetch_workday(board_url, company_name, logo=None, *, remote_only=True, max_p
     Workday public CXS API behind https://{tenant}.{wdN}.myworkdayjobs.com/{site}.
 
     The list endpoint caps pages at 20 postings and only reports `total` on the first page.
-    remote_only: search for "remote" and only open postings whose title/location hint at
-    remote or multiple locations (others can't pass the remote filter).
+    remote_only: search for "remote" and "Tbilisi", and only open postings whose title/location hint
+    at remote, Georgia, or multiple locations (others can't pass the location filter).
     """
     logo = logo or get_logo_url(company_name)
     m = _WORKDAY_BOARD_RE.match((board_url or "").strip())
@@ -267,27 +269,34 @@ def fetch_workday(board_url, company_name, logo=None, *, remote_only=True, max_p
     jobs = []
     try:
         postings: list = []
-        total = None
-        for page in range(max_pages):
-            r = _workday_request(
-                "POST",
-                f"{api}/jobs",
-                json={
-                    "appliedFacets": {},
-                    "limit": page_size,
-                    "offset": page * page_size,
-                    "searchText": "remote" if remote_only else "",
-                },
-                headers=headers,
-                timeout=25,
-            )
-            data = r.json()
-            batch = data.get("jobPostings") or []
-            if total is None:
-                total = int(data.get("total") or 0)
-            postings.extend(batch)
-            if len(batch) < page_size or len(postings) >= total:
-                break
+        seen_paths: set = set()
+        for search_text in (("remote", "Tbilisi") if remote_only else ("",)):
+            fetched = 0
+            total = None
+            for page in range(max_pages):
+                r = _workday_request(
+                    "POST",
+                    f"{api}/jobs",
+                    json={
+                        "appliedFacets": {},
+                        "limit": page_size,
+                        "offset": page * page_size,
+                        "searchText": search_text,
+                    },
+                    headers=headers,
+                    timeout=25,
+                )
+                data = r.json()
+                batch = data.get("jobPostings") or []
+                if total is None:
+                    total = int(data.get("total") or 0)
+                fetched += len(batch)
+                for p in batch:
+                    if p.get("externalPath") not in seen_paths:
+                        seen_paths.add(p.get("externalPath"))
+                        postings.append(p)
+                if len(batch) < page_size or fetched >= total:
+                    break
 
         for p in postings:
             path = p.get("externalPath")
@@ -296,7 +305,9 @@ def fetch_workday(board_url, company_name, logo=None, *, remote_only=True, max_p
             title = p.get("title") or ""
             locations_text = p.get("locationsText") or ""
             if remote_only and not (
-                _REMOTE_HINT_RE.search(f"{title} {locations_text}") or "Locations" in locations_text
+                _REMOTE_HINT_RE.search(f"{title} {locations_text}")
+                or _GEORGIA_HINT_RE.search(locations_text)
+                or "Locations" in locations_text
             ):
                 continue
             try:
@@ -331,7 +342,7 @@ def fetch_icims(base_url, company_name, logo=None, *, remote_only=True, max_page
     Scrape an iCIMS career portal (https://careers-{tenant}.icims.com).
 
     Search pages are paged via pr=0..N-1; detail pages embed schema.org JobPosting JSON-LD.
-    remote_only: only open postings whose list row mentions remote/anywhere.
+    remote_only: only open postings whose list row mentions remote/anywhere or a place in Georgia.
     """
     logo = logo or get_logo_url(company_name)
     base = (base_url or "").strip().rstrip("/")
@@ -376,7 +387,10 @@ def fetch_icims(base_url, company_name, logo=None, *, remote_only=True, max_page
             page += 1
 
         for row in rows:
-            if remote_only and not _REMOTE_HINT_RE.search(f"{row['title']} {row['location']} {row['snippet']}"):
+            if remote_only and not (
+                _REMOTE_HINT_RE.search(f"{row['title']} {row['location']} {row['snippet']}")
+                or _GEORGIA_HINT_RE.search(row["location"])
+            ):
                 continue
             ld: dict = {}
             try:
@@ -1307,6 +1321,27 @@ def _smartrecruiters_flatten_sections(sections: dict | list | None) -> str:
     return "\n\n".join(chunks)
 
 
+def _smartrecruiters_list(base: str, company_handle: str, extra: dict):
+    """Yield every public posting list item for one set of filters (paged by 100)."""
+    offset = 0
+    limit = 100
+    while True:
+        params: dict = {"limit": limit, "offset": offset, "destination": "PUBLIC", **extra}
+        r = httpx.get(f"{base}/{company_handle}/postings", headers=HEADERS, params=params, timeout=30)
+        if r.status_code == 404:
+            logger.warning("SmartRecruiters: no postings for identifier %r (404)", company_handle)
+            return
+        r.raise_for_status()
+        data = r.json()
+        content = data.get("content") or []
+        if not content:
+            return
+        yield from content
+        offset += len(content)
+        if offset >= int(data.get("totalFound") or 0) or len(content) < limit:
+            return
+
+
 def fetch_smartrecruiters(
     company_handle: str,
     company_name: str,
@@ -1320,37 +1355,26 @@ def fetch_smartrecruiters(
     https://developers.smartrecruiters.com/reference/v1listpostings
 
     company_handle: identifier in https://jobs.smartrecruiters.com/{handle}/...
-    remote_only: request locationType=REMOTE (still may include US-only remote roles).
+    remote_only: request locationType=REMOTE (still may include US-only remote roles), plus a second
+    request for postings in Georgia (country code ge), which are kept in any work mode.
     fetch_details: one GET per posting for applyUrl + full description (recommended).
     """
     logo = logo or get_logo_url(company_name)
     base = "https://api.smartrecruiters.com/v1/companies"
     jobs: list = []
-    offset = 0
-    limit = 100
+    seen_ids: set = set()
+    passes = [{"locationType": "REMOTE"}, {"country": "ge"}] if remote_only else [{}]
     try:
-        while True:
-            params: dict = {"limit": limit, "offset": offset, "destination": "PUBLIC"}
-            if remote_only:
-                params["locationType"] = "REMOTE"
-            url = f"{base}/{company_handle}/postings"
-            r = httpx.get(url, headers=HEADERS, params=params, timeout=30)
-            if r.status_code == 404:
-                logger.warning(
-                    "SmartRecruiters: no postings for identifier %r (404)", company_handle
-                )
-                break
-            r.raise_for_status()
-            data = r.json()
-            content = data.get("content") or []
-            if not content:
-                break
-            for item in content:
+        for extra in passes:
+            for item in _smartrecruiters_list(base, company_handle, extra):
                 pid = item.get("id")
-                if not pid:
+                if not pid or pid in seen_ids:
                     continue
-                cid = (item.get("company") or {}).get("identifier") or company_handle
                 loc = item.get("location") or {}
+                if extra.get("country") and (loc.get("country") or "").lower() != extra["country"]:
+                    continue
+                seen_ids.add(pid)
+                cid = (item.get("company") or {}).get("identifier") or company_handle
                 loc_str = loc.get("fullLocation") or ""
                 if not loc_str.strip():
                     loc_str = ", ".join(
@@ -1396,10 +1420,6 @@ def fetch_smartrecruiters(
                         "logo": logo,
                     }
                 )
-            offset += len(content)
-            total_found = int(data.get("totalFound") or 0)
-            if offset >= total_found or len(content) < limit:
-                break
     except Exception:
         logger.exception("SmartRecruiters fetch error for %s (%s)", company_name, company_handle)
     return jobs

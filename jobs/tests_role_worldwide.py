@@ -9,6 +9,7 @@ from . import fetchers
 from . import role_categories as rc
 from .management.commands import fetch_jobs as fetch_jobs_cmd
 from .models import Company, Job
+from .remote_worldwide_filter import is_international_listing_allowed
 
 
 class RoleFamilyTests(SimpleTestCase):
@@ -80,6 +81,13 @@ class WorldwideDefaultTests(TestCase):
         _intl_item("3", "Truck Driver", "Remote - Worldwide"),
         _intl_item("4", "Registered Nurse", "Anywhere in the world"),
         _intl_item("5", "Backend Engineer", "Berlin, Germany", description="Onsite in Berlin."),
+        _intl_item("6", "Product Designer", "Remote", description="Join our design team."),
+        _intl_item("7", "Data Analyst", "Tbilisi, Georgia", description="Onsite in our Tbilisi office."),
+        _intl_item("8", "Software Engineer", "Atlanta, Georgia", description="Onsite in Atlanta."),
+        _intl_item("9", "Frontend Developer", "Remote",
+                   description="You must be located in the United States."),
+        _intl_item("10", "QA Engineer", "Remote - Kenya", description="Remote role."),
+        _intl_item("11", "DevOps Engineer", "Warsaw, Poland / Tbilisi, Georgia", description="Hybrid."),
     ]
 
     def _run(self, *args):
@@ -93,13 +101,13 @@ class WorldwideDefaultTests(TestCase):
         return set(Job.objects.filter(platform="greenhouse", is_active=True)
                    .values_list("external_job_id", flat=True))
 
-    def test_default_keeps_only_worldwide_remote_supported_roles(self):
+    def test_default_keeps_placeless_remote_and_georgia_jobs(self):
         self._run()
-        self.assertEqual(self._active_ids(), {"1", "4"})
+        self.assertEqual(self._active_ids(), {"1", "4", "6", "7", "11"})
 
     def test_allow_region_remote_also_keeps_region_locked_remote(self):
         self._run("--allow-region-remote")
-        self.assertEqual(self._active_ids(), {"1", "2", "4"})
+        self.assertEqual(self._active_ids(), {"1", "2", "4", "6", "7", "9", "10", "11"})
 
     def test_stored_region_locked_job_is_hidden(self):
         company = Company.objects.create(name="Acme", platform="greenhouse")
@@ -110,6 +118,36 @@ class WorldwideDefaultTests(TestCase):
         self._run()
         old.refresh_from_db()
         self.assertFalse(old.is_active)
+
+
+class InternationalLocationRuleTests(SimpleTestCase):
+    def _allowed(self, location, description="", **extra):
+        return is_international_listing_allowed(
+            {"title": "Engineer", "location": location, "description": description, **extra}
+        )
+
+    def test_remote_without_a_place_is_kept(self):
+        for loc in ("Remote", "Remote (Global)", "Remote - Worldwide", "Anywhere", "Fully Remote"):
+            with self.subTest(loc=loc):
+                self.assertTrue(self._allowed(loc))
+        self.assertTrue(self._allowed("", workplace_type="Remote"))
+
+    def test_remote_tied_to_a_place_is_dropped(self):
+        for loc in ("Remote - US", "Remote, EMEA", "Remote (Canada)", "Remote - Kenya", "Remote - CET time zone",
+                    "Remote - Georgia, US", "Georgia - Atlanta Metro - Remote", "USA"):
+            with self.subTest(loc=loc):
+                self.assertFalse(self._allowed(loc))
+        self.assertFalse(self._allowed("Remote", location_country="United States"))
+        self.assertFalse(self._allowed("Remote", "Candidates must be authorized to work in the UK."))
+
+    def test_georgia_locations_are_kept_in_any_work_mode(self):
+        for loc in ("Tbilisi, Georgia", "Tbilisi", "Batumi, Georgia", "Remote - Tbilisi",
+                    "Berlin, Germany / Tbilisi, Georgia"):
+            with self.subTest(loc=loc):
+                self.assertTrue(self._allowed(loc, workplace_type="Onsite"))
+        self.assertTrue(self._allowed("", location_country="Georgia", workplace_type="Hybrid"))
+        self.assertFalse(self._allowed("Atlanta, Georgia", workplace_type="Onsite"))
+        self.assertFalse(self._allowed("Berlin, Germany", workplace_type="Onsite"))
 
 
 def _jobs_ge_page(ids):

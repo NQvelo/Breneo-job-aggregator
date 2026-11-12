@@ -12,7 +12,11 @@ from jobs.location_resolver import resolve_location
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs.industry_taxonomy import determine_industry_tags
 from jobs import fetchers
-from jobs.remote_worldwide_filter import is_remote_listing, is_remote_worldwide_listing
+from jobs.remote_worldwide_filter import (
+    is_georgia_location,
+    is_international_listing_allowed,
+    is_remote_listing,
+)
 from jobs.role_categories import is_supported_role
 import logging
 import re
@@ -208,7 +212,10 @@ class Command(BaseCommand):
         max_jobs = options.get("max_jobs")
         purge_jobs = options.get("purge_jobs")
         allow_region_remote = options.get("allow_region_remote")
-        is_remote_ok = is_remote_listing if allow_region_remote else is_remote_worldwide_listing
+        if allow_region_remote:
+            is_remote_ok = lambda j: is_remote_listing(j) or is_georgia_location(j)  # noqa: E731
+        else:
+            is_remote_ok = is_international_listing_allowed
         try:
             # Verify database connection
             from django.db import connection
@@ -225,7 +232,8 @@ class Command(BaseCommand):
                 logger.info("Purged all jobs before fetch (%s rows)", deleted)
             self.stdout.write(
                 "  Filter: international → "
-                + ("remote (any region)" if allow_region_remote else "remote, open worldwide")
+                + ("remote (any region) or in Georgia" if allow_region_remote
+                   else "remote with no country in the location, or in Georgia")
                 + " + supported role families; Georgian boards (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge)"
                 + " → matching categories"
             )
@@ -596,17 +604,25 @@ class Command(BaseCommand):
                             _compute_industry_tags(job_obj, j, created, logger)
                             job_obj.save(update_fields=["industry_tags"])
 
+                    # International hybrid / onsite jobs are only kept in Georgia.
                     if (
                         platform not in LOCAL_GE_PLATFORMS
                         and norm_applied
                         and job_obj.work_mode in ("hybrid", "onsite")
+                        and not is_georgia_location({
+                            "location": job_obj.location or j.get("location") or "",
+                            "location_country": job_obj.location_country or "",
+                            "description": job_obj.description,
+                            "platform": platform,
+                        })
                     ):
                         job_obj.delete()
                         continue
 
-                    # Final guard re-checks the normalized row with the same remote filter.
+                    # Final guard re-checks the normalized row with the same location filter.
                     if platform not in LOCAL_GE_PLATFORMS:
                         check = {
+                            "platform": platform,
                             "title": job_obj.title or "",
                             "location": job_obj.location or j.get("location") or "",
                             "location_country": job_obj.location_country or "",

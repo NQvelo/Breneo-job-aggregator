@@ -49,8 +49,12 @@ If a run is still active when the next one is due, Railway skips the new run.
    - **Georgian boards** (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge) are read from every board category that
      matches the role families below (category IDs are listed in `jobs/fetchers.py`). Onsite jobs in Georgia
      are kept. An ad cross-posted on several boards is kept once, preferring jobs.ge.
-   - **All other sources** keep a job only if it is remote **and open worldwide** (an explicit
-     worldwide / anywhere signal and no country or region lock), and its title falls in one of the 16 role
+   - **All other sources** keep a job only if its location is either (a) remote with no place in it —
+     "Remote", "Remote (Global)", "Worldwide", "Anywhere" or empty, with no country field and no
+     "must be located in / authorized to work in <country>" in the posting — or (b) in Georgia
+     ("Tbilisi, Georgia", "Batumi", any site of a multi-site list; onsite and hybrid included; the U.S.
+     state of Georgia does not count). Workable, Workday, iCIMS and SmartRecruiters also query
+     Tbilisi / Georgia postings for this. The title must also fall in one of the 16 role
      families in `jobs/role_categories.py`: software engineering, DevOps & cloud, data & AI, design, product
      & business analysis, project & program management, marketing, sales & success, finance & accounting,
      HR & recruiting, customer support, operations & admin, healthcare, education, engineering & trades,
