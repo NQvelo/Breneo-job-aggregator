@@ -20,6 +20,7 @@ from jobs.remote_worldwide_filter import (
 from jobs.role_categories import is_supported_role
 from jobs.ai_job_enrichment import ai_enrichment_enabled, ai_jobs_per_day, ai_pending_q
 import logging
+import os
 import re
 import sys
 
@@ -320,6 +321,11 @@ class Command(BaseCommand):
         local_owner: dict = {}
         companies = sorted(COMPANIES, key=lambda c: c.get("platform") in LOCAL_GE_PLATFORMS)
         local_left = sum(1 for c in companies if c.get("platform") in LOCAL_GE_PLATFORMS)
+        # International sources get at most this share; what they leave goes to the Georgian boards.
+        intl_left = None
+        if new_budget is not None:
+            share_pct = min(100, max(0, int(os.environ.get("AI_INTERNATIONAL_SHARE", "50"))))
+            intl_left = new_budget * share_pct // 100 if local_left else new_budget
 
         for comp in companies:
             if stop_fetching:
@@ -333,7 +339,7 @@ class Command(BaseCommand):
                 new_share = new_budget // max(1, local_left)
                 local_left -= 1
             else:
-                new_share = new_budget
+                new_share = min(new_budget, intl_left)
             # Boards that open a page per job stop once the share is covered (some pages are skipped as thin).
             detail_cap = None if new_share is None else (2 * new_share + 5 if new_share else 0)
 
@@ -774,6 +780,8 @@ class Command(BaseCommand):
 
             if new_budget is not None:
                 new_budget = max(0, new_budget - new_count)
+                if platform not in LOCAL_GE_PLATFORMS:
+                    intl_left = max(0, intl_left - new_count)
             held_back_total += skipped_new
             if skipped_new:
                 self.stdout.write(f"  ⊘ Left {skipped_new} new job(s) for a later run (AI daily capacity)")

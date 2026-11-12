@@ -140,6 +140,20 @@ class FetchJobsAICapacityTests(TestCase):
         self.assertEqual(Job.objects.filter(platform="jobs.ge").count(), 2)
         self.assertEqual(Job.objects.filter(platform="hr.ge").count(), 2)
 
+    def test_international_sources_leave_half_for_georgian_boards(self):
+        intl = [{**_feed_item(f"w{i}"), "platform": "weworkremotely", "title": f"Python Developer {i}",
+                 "location": "Remote", "location_country": None} for i in range(6)]
+        self._run({"weworkremotely": intl, "jobs.ge": self._items("jobs.ge", ["a1", "a2", "a3", "a4"])}, "4")
+        self.assertEqual(Job.objects.filter(platform="weworkremotely").count(), 2)
+        self.assertEqual(Job.objects.filter(platform="jobs.ge").count(), 2)
+
+    def test_georgian_boards_get_what_international_sources_leave(self):
+        intl = [{**_feed_item("w1"), "platform": "weworkremotely", "title": "Python Developer",
+                 "location": "Remote", "location_country": None}]
+        self._run({"weworkremotely": intl, "jobs.ge": self._items("jobs.ge", ["a1", "a2", "a3", "a4"])}, "4")
+        self.assertEqual(Job.objects.filter(platform="weworkremotely").count(), 1)
+        self.assertEqual(Job.objects.filter(platform="jobs.ge").count(), 3)
+
     def test_full_backlog_holds_back_new_jobs_without_failing(self):
         out = self._run({"jobs.ge": self._items("jobs.ge", ["1", "2"])}, "0")
         self.assertFalse(Job.objects.exists())

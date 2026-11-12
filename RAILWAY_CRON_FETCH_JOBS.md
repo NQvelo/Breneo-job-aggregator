@@ -51,8 +51,8 @@ If a run is still active when the next one is due, Railway skips the new run.
    hides the ones that fail (also available on its own: `python manage.py prune_international_jobs`).
 1. Fetches every source in `COMPANIES` (`jobs/management/commands/fetch_jobs.py`), adding at most
    `AI_JOBS_PER_DAY` minus the jobs still waiting for an AI summary as **new** jobs, so the AI step can
-   summarize every one of them (no AI key → no new jobs). International sources go first; the Georgian
-   boards split what is left, and jobs.ge / hr.ge only open that many detail pages. New jobs over the
+   summarize every one of them (no AI key → no new jobs). International sources go first but take at
+   most `AI_INTERNATIONAL_SHARE` percent (default 50); the Georgian boards split what is left, and jobs.ge / hr.ge only open that many detail pages. New jobs over the
    limit are left for later runs. Stored jobs are always refreshed. `--no-ai-limit` adds everything.
    `python manage.py trim_ai_backlog [--delete]` deletes waiting jobs beyond the newest `AI_JOBS_PER_DAY`.
    - **Georgian boards** (jobs.ge, hr.ge, myjobs.ge, jobs.ss.ge) are read from every board category that
