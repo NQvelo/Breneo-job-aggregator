@@ -87,17 +87,51 @@ def _job_id(data, snapshot_payload):
 
 def _cache_key(user_id: str, profile_version: str, scope: str, limit: int) -> str:
     raw = f"{user_id}\0{profile_version}\0{scope}\0{limit}".encode()
-    return "jobmatch:v1:" + hashlib.sha256(raw).hexdigest()
+    return "jobmatch:v2:" + hashlib.sha256(raw).hexdigest()
 
 
-def job_match_payload(job, score) -> dict:
+_WORK_MODE_VALUES = {"remote", "hybrid", "on-site", "onsite", "on site", "unknown"}
+_EMPLOYMENT_KEYS = (
+    "employment_type_note",
+    "employment_type",
+    "job_employment_type",
+    "job_type",
+    "commitment",
+    "type",
+)
+
+
+def _employment_type(job) -> str | None:
+    raw = job.raw if isinstance(job.raw, dict) else {}
+    submitted = raw.get("employer_submitted")
+    sources = [submitted, raw] if isinstance(submitted, dict) else [raw]
+    for source in sources:
+        for key in _EMPLOYMENT_KEYS:
+            value = source.get(key)
+            if not isinstance(value, str):
+                continue
+            text = value.strip()
+            if text and text.lower() not in _WORK_MODE_VALUES:
+                return text
+    return None
+
+
+def job_match_payload(job, score, request=None) -> dict:
+    from .logo_url import resolved_company_logo_url
+
     posted = job.posted_at
+    logo = resolved_company_logo_url(job.company, request)
     return {
         "id": job.id,
         "title": job.title,
         "company": job.company.name,
+        "company_logo": logo or None,
         "location": job.location,
         "posted_at": posted.isoformat() if posted else None,
+        "salary": job.salary or None,
+        "employment_type": _employment_type(job),
+        "work_mode": job.work_mode or None,
+        "workplace_type": job.workplace_type or None,
         "match_percent": score.match_percent,
         "skills_percent": score.skills_percent,
         "experience_percent": score.experience_percent,
@@ -105,14 +139,14 @@ def job_match_payload(job, score) -> dict:
     }
 
 
-def _ranked_jobs(scope: str, snapshot, limit: int) -> list[dict]:
+def _ranked_jobs(scope: str, snapshot, limit: int, request=None) -> list[dict]:
     jobs = list(candidate_jobs(scope, snapshot.seniority, snapshot.skills))
     ranked = []
     for job in jobs:
         score = score_job(job, snapshot)
         posted = job.posted_at
         posted_key = posted.timestamp() if posted is not None else float("-inf")
-        ranked.append((score.match_percent, posted_key, job.id, job_match_payload(job, score)))
+        ranked.append((score.match_percent, posted_key, job.id, job_match_payload(job, score, request)))
     ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [item[3] for item in ranked[:limit]]
 
@@ -145,7 +179,7 @@ class JobMatchesView(InternalMatchView):
         if cached is not None:
             return Response(cached, headers=_NO_STORE)
 
-        payload = _ranked_jobs(scope, snapshot, limit)
+        payload = _ranked_jobs(scope, snapshot, limit, request)
         cache.set(key, payload, MATCH_CACHE_TTL_SECONDS)
         return Response(payload, headers=_NO_STORE)
 
@@ -172,8 +206,15 @@ class JobMatchOneView(InternalMatchView):
                 "min_years_experience",
                 "industry_tags",
                 "languages_required",
+                "salary",
+                "work_mode",
+                "workplace_type",
+                "raw",
                 "company__name",
+                "company__logo",
+                "company__logo_upload",
+                "company__employer_created",
             ).get(pk=job_id)
         except Job.DoesNotExist:
             return Response({"error": "Job not found."}, status=404, headers=_NO_STORE)
-        return Response(job_match_payload(job, score_job(job, snapshot)), headers=_NO_STORE)
+        return Response(job_match_payload(job, score_job(job, snapshot), request), headers=_NO_STORE)

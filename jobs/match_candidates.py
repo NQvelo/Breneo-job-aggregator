@@ -29,7 +29,14 @@ _CARD_FIELDS = (
     "industry_tags",
     "languages_required",
     "is_active",
+    "salary",
+    "work_mode",
+    "workplace_type",
+    "raw",
     "company__name",
+    "company__logo",
+    "company__logo_upload",
+    "company__employer_created",
 )
 
 

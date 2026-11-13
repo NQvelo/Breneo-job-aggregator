@@ -230,6 +230,8 @@ class InternalMatchApiTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_list_and_one_return_the_same_integer(self):
+        self.company.logo = "https://cdn.example/logo.png"
+        self.company.save(update_fields=["logo"])
         job = self._job(
             "golden",
             skills_required=["JavaScript", "Python"],
@@ -238,6 +240,10 @@ class InternalMatchApiTests(TestCase):
             industry_tags="fintech",
             languages_required=["English C1"],
             title="Engineer",
+            salary="3000-5000",
+            work_mode="remote",
+            workplace_type="Remote",
+            raw={"employment_type": "Full-time"},
         )
         body = _snapshot() | {"scope": "worldwide", "limit": 10}
         listed = self._post("/internal/job-matches", body)
@@ -248,6 +254,11 @@ class InternalMatchApiTests(TestCase):
         row = listed.data[0]
         self.assertEqual(row["id"], job.id)
         self.assertEqual(row["company"], "Match Co")
+        self.assertEqual(row["company_logo"], "https://cdn.example/logo.png")
+        self.assertEqual(row["salary"], "3000-5000")
+        self.assertEqual(row["employment_type"], "Full-time")
+        self.assertEqual(row["work_mode"], "remote")
+        self.assertEqual(row["workplace_type"], "Remote")
         self.assertEqual(row["match_percent"], 50)
         self.assertEqual(row["skills_percent"], 50)
         self.assertEqual(row["experience_percent"], 71)
