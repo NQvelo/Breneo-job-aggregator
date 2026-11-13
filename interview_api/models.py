@@ -5,6 +5,44 @@ from django.db import models
 from interview_api.storage import interview_audio_storage
 
 
+class InterviewRole(models.Model):
+    """One row per role a candidate can pick on the /start onboarding page."""
+
+    slug = models.SlugField(max_length=64, unique=True)
+    title = models.CharField(max_length=255)
+    title_ka = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class RoleQuestion(models.Model):
+    """A prepared technical question belonging to one role."""
+
+    role = models.ForeignKey(
+        InterviewRole,
+        on_delete=models.CASCADE,
+        related_name="questions",
+    )
+    position = models.PositiveSmallIntegerField()
+    question_text = models.TextField()
+
+    class Meta:
+        ordering = ["role", "position"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["role", "position"],
+                name="interview_api_unique_role_question_position",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.role.slug} #{self.position}"
+
+
 class Interview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.CharField(max_length=255, db_index=True)
@@ -15,7 +53,15 @@ class Interview(models.Model):
         null=True,
         blank=True,
     )
+    role = models.ForeignKey(
+        InterviewRole,
+        on_delete=models.SET_NULL,
+        related_name="interviews",
+        null=True,
+        blank=True,
+    )
     job_position = models.CharField(max_length=255)
+    planned_questions = models.JSONField(default=list, blank=True)
     welcome_text = models.TextField(blank=True, default="")
     welcome_audio = models.FileField(
         upload_to="interview_welcome/",

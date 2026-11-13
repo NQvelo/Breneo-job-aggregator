@@ -25,6 +25,11 @@ class LLMResponseParseError(InterviewAPIError):
         super().__init__(message, status_code=502)
 
 
+class InterviewRoleNotFound(InterviewAPIError):
+    def __init__(self, message: str = "No prepared interview is available for this role."):
+        super().__init__(message, status_code=400)
+
+
 class TTSServiceError(InterviewAPIError):
     def __init__(self, message: str = "Georgian speech synthesis failed."):
         super().__init__(message, status_code=502)

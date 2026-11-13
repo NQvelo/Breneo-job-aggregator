@@ -25,10 +25,13 @@ def _absolute_file_url(file_field, request) -> str | None:
 class StartInterviewSerializer(serializers.Serializer):
     job_position = serializers.CharField(max_length=255, trim_whitespace=True, required=False, allow_blank=True)
     job_id = serializers.IntegerField(required=False, min_value=1)
+    role = serializers.SlugField(max_length=64, required=False, allow_blank=True)
 
     def validate(self, attrs):
         job_id = attrs.get("job_id")
         job_position = (attrs.get("job_position") or "").strip()
+        role = (attrs.get("role") or "").strip()
+        attrs["role"] = role
 
         if job_id is not None:
             try:
@@ -39,9 +42,9 @@ class StartInterviewSerializer(serializers.Serializer):
             attrs["job_position"] = job.title.strip()
             return attrs
 
-        if not job_position:
+        if not job_position and not role:
             raise serializers.ValidationError(
-                {"job_position": "job_position or job_id is required."}
+                {"job_position": "job_position, job_id, or role is required."}
             )
         attrs["job_position"] = job_position
         attrs["job"] = None
@@ -68,6 +71,9 @@ class InterviewQuestionSerializer(serializers.ModelSerializer):
         )
 
     def get_total_questions(self, obj) -> int:
+        planned = obj.interview.planned_questions or []
+        if planned:
+            return len(planned)
         return MAX_INTERVIEW_QUESTIONS
 
     def get_question_audio_url(self, obj) -> str | None:
@@ -76,10 +82,11 @@ class InterviewQuestionSerializer(serializers.ModelSerializer):
 
 class InterviewSerializer(serializers.ModelSerializer):
     job_id = serializers.IntegerField(source="job.id", read_only=True, allow_null=True)
+    role = serializers.SlugField(source="role.slug", read_only=True, allow_null=True)
 
     class Meta:
         model = Interview
-        fields = ("id", "job_id", "job_position", "created_at")
+        fields = ("id", "job_id", "role", "job_position", "created_at")
 
 
 class InterviewPlaybackItemSerializer(serializers.Serializer):
@@ -94,6 +101,7 @@ class StartInterviewResponseSerializer(serializers.Serializer):
     welcome_audio_url = serializers.SerializerMethodField()
     playback = serializers.SerializerMethodField()
     question = InterviewQuestionSerializer()
+    questions = serializers.SerializerMethodField()
 
     def get_welcome_text(self, obj) -> str:
         return obj["interview"].welcome_text or ""
@@ -118,6 +126,10 @@ class StartInterviewResponseSerializer(serializers.Serializer):
             },
         ]
         return InterviewPlaybackItemSerializer(items, many=True).data
+
+    def get_questions(self, obj) -> list[dict]:
+        questions = obj["interview"].questions.order_by("order")
+        return InterviewQuestionSerializer(questions, many=True, context=self.context).data
 
 
 class SubmitAudioSerializer(serializers.Serializer):

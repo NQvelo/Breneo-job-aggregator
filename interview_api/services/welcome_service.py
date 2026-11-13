@@ -6,10 +6,10 @@ from interview_api.constants import MAX_INTERVIEW_QUESTIONS
 from interview_api.services.job_context import InterviewJobContext
 
 
-def build_welcome_text(context: InterviewJobContext) -> str:
+def build_welcome_text(context: InterviewJobContext, question_count: int | None = None) -> str:
     """Build a natural Georgian interviewer welcome for session start."""
     role = context.job_position.strip()
-    question_count = MAX_INTERVIEW_QUESTIONS
+    question_count = question_count or MAX_INTERVIEW_QUESTIONS
 
     if context.company_name:
         intro = (

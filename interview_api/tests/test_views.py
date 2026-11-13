@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from jobs.authentication.breneo_auth import BreneoUser
 from interview_api.constants import MAX_INTERVIEW_QUESTIONS
 from interview_api.models import Interview, InterviewQuestion
+from interview_api.question_bank import ROLE_QUESTIONS
 from interview_api.schemas.evaluation import InterviewEvaluationResult
 
 
@@ -27,10 +28,12 @@ class InterviewAPITestCase(TestCase):
         self.client.force_authenticate(user=self.breneo_user)
 
     def test_start_interview_creates_records(self):
+        bank = ROLE_QUESTIONS["backend"]
+        chosen = list(reversed(bank[:MAX_INTERVIEW_QUESTIONS]))
         with (
             patch(
-                "interview_api.services.interview_service.generate_interview_question",
-                return_value="როგორ მუშაობთ Django-ზე?",
+                "interview_api.services.interview_service.random.sample",
+                return_value=chosen,
             ),
             patch(
                 "interview_api.services.interview_service.synthesize_question_audio",
@@ -44,13 +47,18 @@ class InterviewAPITestCase(TestCase):
             )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(
-            response.data["question"]["question_text"],
-            "როგორ მუშაობთ Django-ზე?",
-        )
+        self.assertEqual(response.data["interview"]["role"], "backend")
+        self.assertEqual(response.data["question"]["question_text"], chosen[0])
         self.assertEqual(response.data["question"]["question_number"], 1)
         self.assertEqual(response.data["question"]["total_questions"], MAX_INTERVIEW_QUESTIONS)
         self.assertTrue(response.data["question"]["question_audio_url"])
+        self.assertEqual(
+            [item["question_text"] for item in response.data["questions"]],
+            chosen,
+        )
+        self.assertEqual(len(response.data["questions"]), MAX_INTERVIEW_QUESTIONS)
+        self.assertIsNone(response.data["questions"][1]["question_audio_url"])
+        self.assertIn("5", response.data["welcome_text"])
         self.assertTrue(response.data["welcome_text"])
         self.assertIn("გამარჯობა", response.data["welcome_text"])
         self.assertTrue(response.data["welcome_audio_url"])
@@ -58,22 +66,54 @@ class InterviewAPITestCase(TestCase):
         self.assertEqual(response.data["playback"][0]["type"], "welcome")
         self.assertTrue(response.data["playback"][0]["audio_url"])
         self.assertEqual(response.data["playback"][1]["type"], "question")
-        self.assertTrue(
-            Interview.objects.filter(
-                user_id=self.user_id,
-                job_position="Python Developer",
-            ).exists()
+        interview = Interview.objects.get(user_id=self.user_id, job_position="Python Developer")
+        self.assertEqual(interview.planned_questions, chosen)
+        self.assertEqual(interview.questions.count(), MAX_INTERVIEW_QUESTIONS)
+
+    def test_start_interview_rejects_unknown_role(self):
+        response = self.client.post(
+            "/api/v1/interview/start/",
+            {"job_position": "Astronaut"},
+            format="json",
         )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Interview.objects.exists())
+
+    def test_start_interview_accepts_role_slug(self):
+        with patch(
+            "interview_api.services.interview_service.synthesize_question_audio",
+            side_effect=_mock_tts,
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"role": "accountant"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["interview"]["role"], "accountant")
+        self.assertEqual(response.data["interview"]["job_position"], "Accountant")
+        texts = {item["question_text"] for item in response.data["questions"]}
+        self.assertTrue(texts <= set(ROLE_QUESTIONS["accountant"]))
+        self.assertEqual(len(texts), MAX_INTERVIEW_QUESTIONS)
 
     def test_submit_audio_returns_evaluation_and_next_question(self):
+        planned = [
+            "აღწერეთ თქვენი ბოლო პროექტი.",
+            "რა არის REST API?",
+            "მესამე კითხვა.",
+            "მეოთხე კითხვა.",
+            "მეხუთე კითხვა.",
+        ]
         interview = Interview.objects.create(
             user_id=self.user_id,
             job_position="Backend Engineer",
+            planned_questions=planned,
         )
         question = InterviewQuestion.objects.create(
             interview=interview,
             order=1,
-            question_text="აღწერეთ თქვენი ბოლო პროექტი.",
+            question_text=planned[0],
         )
 
         evaluation = InterviewEvaluationResult.model_validate(
@@ -117,10 +157,6 @@ class InterviewAPITestCase(TestCase):
             patch(
                 "interview_api.services.interview_service.evaluate_interview_answer",
                 return_value=evaluation,
-            ),
-            patch(
-                "interview_api.services.interview_service.generate_interview_question",
-                return_value="რა არის REST API?",
             ),
             patch(
                 "interview_api.services.interview_service.synthesize_question_audio",
@@ -270,15 +306,9 @@ class InterviewAPITestCase(TestCase):
             qualifications="5+ years Python experience.",
         )
 
-        with (
-            patch(
-                "interview_api.services.interview_service.generate_interview_question",
-                return_value="როგორ მუშაობთ Django-ზე?",
-            ) as mock_generate,
-            patch(
-                "interview_api.services.interview_service.synthesize_question_audio",
-                side_effect=_mock_tts,
-            ),
+        with patch(
+            "interview_api.services.interview_service.synthesize_question_audio",
+            side_effect=_mock_tts,
         ):
             response = self.client.post(
                 "/api/v1/interview/start/",
@@ -289,21 +319,17 @@ class InterviewAPITestCase(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["interview"]["job_id"], job.id)
         self.assertEqual(response.data["interview"]["job_position"], "Senior Python Developer")
-        job_context = mock_generate.call_args.args[0]
-        self.assertEqual(job_context.job_position, "Senior Python Developer")
-        self.assertIn("Python", job_context.skills_required)
+        self.assertEqual(response.data["interview"]["role"], "backend")
+        self.assertIn(
+            response.data["question"]["question_text"],
+            ROLE_QUESTIONS["backend"],
+        )
 
     @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
     def test_start_interview_via_bff_auth(self):
-        with (
-            patch(
-                "interview_api.services.interview_service.generate_interview_question",
-                return_value="კითხვა",
-            ),
-            patch(
-                "interview_api.services.interview_service.synthesize_question_audio",
-                side_effect=_mock_tts,
-            ),
+        with patch(
+            "interview_api.services.interview_service.synthesize_question_audio",
+            side_effect=_mock_tts,
         ):
             response = self.client.post(
                 "/api/v1/interview/start/",
@@ -322,15 +348,9 @@ class InterviewAPITestCase(TestCase):
 
     @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
     def test_start_interview_via_bff_bearer_legacy(self):
-        with (
-            patch(
-                "interview_api.services.interview_service.generate_interview_question",
-                return_value="კითხვა",
-            ),
-            patch(
-                "interview_api.services.interview_service.synthesize_question_audio",
-                side_effect=_mock_tts,
-            ),
+        with patch(
+            "interview_api.services.interview_service.synthesize_question_audio",
+            side_effect=_mock_tts,
         ):
             response = self.client.post(
                 "/api/v1/interview/start/",
