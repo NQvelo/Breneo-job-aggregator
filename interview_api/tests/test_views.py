@@ -97,6 +97,41 @@ class InterviewAPITestCase(TestCase):
         self.assertTrue(texts <= set(ROLE_QUESTIONS["accountant"]))
         self.assertEqual(len(texts), MAX_INTERVIEW_QUESTIONS)
 
+    def test_start_reuses_prepared_question_speech(self):
+        bank = ROLE_QUESTIONS["react"]
+        chosen = list(bank[:MAX_INTERVIEW_QUESTIONS])
+        tts = patch(
+            "interview_api.services.interview_service.synthesize_question_audio",
+            side_effect=_mock_tts,
+        )
+        sample = patch(
+            "interview_api.services.interview_service.random.sample",
+            return_value=chosen,
+        )
+        with tts as synthesize, sample:
+            first = self.client.post(
+                "/api/v1/interview/start/",
+                {"role": "react"},
+                format="json",
+            )
+            first_calls = synthesize.call_count
+            second = self.client.post(
+                "/api/v1/interview/start/",
+                {"role": "react"},
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.data["question"]["question_text"], chosen[0])
+        self.assertEqual(second.data["question"]["question_text"], chosen[0])
+        self.assertEqual(
+            [item["question_text"] for item in second.data["questions"]],
+            chosen,
+        )
+        self.assertGreater(first_calls, 0)
+        self.assertEqual(synthesize.call_count, first_calls)
+
     def test_submit_audio_returns_evaluation_and_next_question(self):
         planned = [
             "აღწერეთ თქვენი ბოლო პროექტი.",

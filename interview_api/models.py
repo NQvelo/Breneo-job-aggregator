@@ -19,6 +19,20 @@ class InterviewRole(models.Model):
         return self.title
 
 
+class PreparedSpeech(models.Model):
+    """Spoken audio for a fixed text, reused so start does not synthesize it again."""
+
+    text_hash = models.CharField(max_length=64, unique=True)
+    audio = models.FileField(
+        upload_to="interview_prepared/",
+        storage=interview_audio_storage,
+        blank=True,
+    )
+
+    def __str__(self) -> str:
+        return self.text_hash
+
+
 class RoleQuestion(models.Model):
     """A prepared technical question belonging to one role."""
 

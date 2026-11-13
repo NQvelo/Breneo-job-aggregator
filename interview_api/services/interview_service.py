@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from django.db import transaction
 
 from interview_api.constants import MAX_INTERVIEW_QUESTIONS
 from interview_api.exceptions import InterviewAPIError, InterviewRoleNotFound, TTSServiceError
-from interview_api.models import Interview, InterviewAttempt, InterviewQuestion
+from interview_api.models import Interview, InterviewAttempt, InterviewQuestion, PreparedSpeech
 from interview_api.role_matching import display_title_for_slug, resolve_interview_role
 from interview_api.schemas.evaluation import InterviewEvaluationResult
 from interview_api.services.job_context import InterviewJobContext
@@ -40,14 +42,62 @@ class InterviewService:
             return len(planned)
         return MAX_INTERVIEW_QUESTIONS
 
+    @staticmethod
+    def _speech_hash(text: str) -> str:
+        return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+    def _stored_speech_name(self, text: str) -> str:
+        existing = PreparedSpeech.objects.filter(text_hash=self._speech_hash(text)).first()
+        if existing is not None and existing.audio and existing.audio.name:
+            return existing.audio.name
+        return ""
+
+    def _store_speech(self, text: str, audio) -> str:
+        digest = self._speech_hash(text)
+        row, _created = PreparedSpeech.objects.get_or_create(text_hash=digest)
+        if not row.audio or not row.audio.name:
+            row.audio.save(f"{digest[:16]}.mp3", audio, save=True)
+        return row.audio.name
+
+    def _speech_name(self, text: str) -> str:
+        """Reuse stored speech for this exact text. Synthesize only on a cache miss."""
+        cached = self._stored_speech_name(text)
+        if cached:
+            return cached
+        return self._store_speech(text, synthesize_question_audio(text.strip()))
+
+    def _speech_names(self, welcome_text: str, question_text: str) -> tuple[str, str]:
+        """Look up both clips, and synthesize any misses at the same time."""
+        welcome_name = self._stored_speech_name(welcome_text)
+        question_name = self._stored_speech_name(question_text)
+        missing: list[tuple[str, str]] = []
+        if not welcome_name:
+            missing.append(("welcome", welcome_text.strip()))
+        if not question_name:
+            missing.append(("question", question_text.strip()))
+        if not missing:
+            return welcome_name, question_name
+
+        with ThreadPoolExecutor(max_workers=len(missing)) as pool:
+            synthesized = {
+                key: pool.submit(synthesize_question_audio, text)
+                for key, text in missing
+            }
+            audio_by_key = {key: future.result() for key, future in synthesized.items()}
+
+        if not welcome_name:
+            welcome_name = self._store_speech(welcome_text, audio_by_key["welcome"])
+        if not question_name:
+            question_name = self._store_speech(question_text, audio_by_key["question"])
+        return welcome_name, question_name
+
+    def _assign_cached_audio(self, file_field, text: str) -> None:
+        file_field.name = self._speech_name(text)
+
     def _ensure_audio(self, question: InterviewQuestion) -> InterviewQuestion:
         if question.question_audio and question.question_audio.name:
             return question
-        question.question_audio.save(
-            f"interview_{question.interview_id}_q{question.order}.mp3",
-            synthesize_question_audio(question.question_text),
-            save=False,
-        )
+        self._assign_cached_audio(question.question_audio, question.question_text)
         question.save(update_fields=["question_audio"])
         return question
 
@@ -58,6 +108,7 @@ class InterviewService:
         order: int,
         question_text: str,
         with_audio: bool,
+        audio_name: str = "",
     ) -> InterviewQuestion:
         question = InterviewQuestion(
             interview=interview,
@@ -65,11 +116,7 @@ class InterviewService:
             question_text=question_text,
         )
         if with_audio:
-            question.question_audio.save(
-                f"interview_{interview.id}_q{order}.mp3",
-                synthesize_question_audio(question_text),
-                save=False,
-            )
+            question.question_audio.name = audio_name or self._speech_name(question_text)
         question.save()
         return question
 
@@ -95,22 +142,12 @@ class InterviewService:
             with_audio=True,
         )
 
-    def _attach_welcome(self, interview: Interview) -> None:
-        if interview.job_id:
-            interview = Interview.objects.select_related("job", "job__company").get(pk=interview.pk)
-
-        context = self._job_context(interview)
-        welcome_text = build_welcome_text(context, question_count=self._session_length(interview))
-        interview.welcome_text = welcome_text
-        interview.welcome_audio.save(
-            f"interview_{interview.id}_welcome.mp3",
-            synthesize_question_audio(welcome_text),
-            save=False,
-        )
-        interview.save(update_fields=["welcome_text", "welcome_audio"])
-
-        if not interview.welcome_audio.name:
-            raise TTSServiceError("Welcome audio could not be saved.")
+    def _welcome_for(self, *, job, position: str, question_count: int) -> str:
+        if job is not None:
+            context = InterviewJobContext.from_job(job)
+        else:
+            context = InterviewJobContext.from_position(position)
+        return build_welcome_text(context, question_count=question_count)
 
     @transaction.atomic
     def start_interview(
@@ -128,14 +165,28 @@ class InterviewService:
         )
         selected = self._select_questions(role)
         position = (job_position or "").strip() or display_title_for_slug(role.slug)
+        welcome_text = self._welcome_for(
+            job=job,
+            position=position,
+            question_count=len(selected),
+        )
+        # Speech for the welcome and the first bank question runs together.
+        # Later questions stay text-only until the candidate reaches them.
+        welcome_name, first_audio_name = self._speech_names(welcome_text, selected[0])
+
+        if not welcome_name or not first_audio_name:
+            raise TTSServiceError("Welcome audio could not be saved.")
+
         interview = Interview.objects.create(
             user_id=user_id.strip(),
             job=job,
             role=role,
             job_position=position,
             planned_questions=selected,
+            welcome_text=welcome_text,
         )
-        self._attach_welcome(interview)
+        interview.welcome_audio.name = welcome_name
+        interview.save(update_fields=["welcome_audio"])
         first_question = None
         for order, question_text in enumerate(selected, start=1):
             question = self._create_spoken_question(
@@ -143,6 +194,7 @@ class InterviewService:
                 order=order,
                 question_text=question_text,
                 with_audio=order == 1,
+                audio_name=first_audio_name if order == 1 else "",
             )
             if order == 1:
                 first_question = question
