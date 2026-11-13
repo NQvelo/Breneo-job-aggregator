@@ -250,7 +250,7 @@ class StoredSummaryTests(TestCase):
         self.job.responsibilities = "• Acme builds the AI orchestration platform."
         self.job.save(update_fields=["skills_required", "responsibilities"])
         self.job.refresh_from_db()
-        self.assertEqual(self.job.skills_required, ["PostgreSQL", "Python"])
+        self.assertEqual(self.job.skills_required, ["sql", "python"])
         self.assertEqual(self.job.skills_preferred, ["Kubernetes"])
         self.assertIn("Jira", self.job.tech_stack)
         self.assertTrue(self.job.responsibilities.startswith("• Build and maintain"))
@@ -289,7 +289,7 @@ class EnrichCommandTests(TestCase):
             self._run()
         self.assertEqual(summarize.call_count, 1)  # employer job skipped; second run finds nothing new
         self.job.refresh_from_db()
-        self.assertEqual(self.job.skills_required, ["PostgreSQL", "Python"])
+        self.assertEqual(self.job.skills_required, ["sql", "python"])
         self.assertIsNotNone(ai.current_ai_result(self.job))
 
     def test_stops_after_repeated_failures(self):

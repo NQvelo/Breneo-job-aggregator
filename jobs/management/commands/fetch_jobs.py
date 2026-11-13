@@ -8,6 +8,7 @@ from jobs.models import Company, Job, deadline_cutoff_ge
 from jobs.utils import parse_date, process_job_description, is_valid_benefits_text
 from jobs.job_posting_parser import parse_job_posting_for_db
 from jobs.job_normalizer import normalize_job_fields
+from jobs.skill_variants import has_stored_skills
 from jobs.location_resolver import resolve_location
 from jobs.matching_normalizer import extract_visa_sponsorship, extract_work_authorization_required
 from jobs.industry_taxonomy import determine_industry_tags
@@ -588,6 +589,7 @@ class Command(BaseCommand):
                                     break
 
                     # Auto-fill parsed data for every new/updated job (responsibilities, qualifications, summary, workplace_type, skills_required)
+                    skills_already_stored = has_stored_skills(job_obj.skills_required)
                     if job_obj.description:
                         try:
                             parsed = parse_job_posting_for_db(
@@ -609,7 +611,7 @@ class Command(BaseCommand):
                             if parsed.get("workplace_type"):
                                 job_obj.workplace_type = parsed["workplace_type"]
                                 updated = True
-                            if parsed.get("skills_required"):
+                            if parsed.get("skills_required") and not skills_already_stored:
                                 job_obj.skills_required = parsed["skills_required"]
                                 updated = True
                             if updated:
@@ -660,10 +662,11 @@ class Command(BaseCommand):
                             )
                             norm_applied = True
                             job_obj.work_mode = norm.get("work_mode", "unknown")
-                            job_obj.seniority = norm.get("seniority", "unknown")
+                            # Seniority is resolved on save from the stored field, then the title.
                             job_obj.role_category = norm.get("role_category")
                             job_obj.min_years_experience = norm.get("min_years_experience")
-                            job_obj.skills_required = norm.get("skills_required") or []
+                            if not skills_already_stored:
+                                job_obj.skills_required = norm.get("skills_required") or []
                             job_obj.skills_preferred = norm.get("skills_preferred") or []
                             job_obj.tech_stack = norm.get("tech_stack") or []
                             job_obj.tech_stack_candidates = norm.get("tech_stack_candidates") or []

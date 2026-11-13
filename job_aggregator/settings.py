@@ -300,6 +300,20 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Server-side cache for internal job matches (userId + profileVersion + scope + limit, 15 min).
+# One gunicorn worker, so this process cache is shared by every device of an account.
+# The match endpoints send Cache-Control: no-store. The client cache is not the source of truth.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "job-aggregator",
+    }
+}
+
+# breneo-api calls POST /internal/job-matches with header X-Internal-Key.
+# Never put this value in a browser bundle.
+INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "").strip()
+
 # Job applications (BFF safe mode): server calls only.
 # APPLICATION_API_SECRET — X-Application-Key header (falls back to EMPLOYER_POST_SECRET).
 # Browser must use your Next.js API routes; never expose this secret in NEXT_PUBLIC_*.

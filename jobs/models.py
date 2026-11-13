@@ -387,7 +387,11 @@ class Job(models.Model):
     skills_required = models.JSONField(
         default=list,
         blank=True,
-        help_text="List of required skills extracted from job posting",
+        help_text=(
+            "Required skills, normalized with the app variant map. "
+            "Stored skills are kept; an empty list is inferred once on save. "
+            "GIN-indexed on PostgreSQL."
+        ),
     )
 
     # === MATCHING CORE FIELDS (for job-user matching system) ===
@@ -403,9 +407,11 @@ class Job(models.Model):
     seniority = models.CharField(
         max_length=20,
         choices=SENIORITY_CHOICES,
-        default="unknown",
+        null=True,
+        blank=True,
+        default=None,
         db_index=True,
-        help_text="Seniority: intern, junior, mid, senior, lead, or unknown",
+        help_text="Seniority: intern, junior, mid, senior, lead, or null. Read from this field, then the title.",
     )
     # Role category for domain matching (frontend, backend, data, etc.)
     role_category = models.CharField(
@@ -590,6 +596,12 @@ class Job(models.Model):
         return text[:max_chars] + ("..." if len(text) > max_chars else "")
 
     def save(self, *args, **kwargs):
+        from .match_score import resolve_seniority
+        from .skill_variants import has_stored_skills, normalize_skill_list
+
+        skills_at_start = has_stored_skills(self.skills_required)
+        seniority_at_start = self.seniority
+
         # Clean description to ensure it's plain text (safety net)
         if self.description:
             from bs4 import BeautifulSoup
@@ -758,8 +770,9 @@ class Job(models.Model):
                 self.seniority = norm.get("seniority", "unknown")
                 self.role_category = norm.get("role_category")
                 self.min_years_experience = norm.get("min_years_experience")
-                # Fetched jobs: infer skills from catalog. Employer posts: only Gemini / heuristic parser / manual.
-                if self.platform != "employer":
+                # Infer skills only when none are stored. Do not merge a description guess
+                # into skills the job already has.
+                if self.platform != "employer" and not skills_at_start:
                     self.skills_required = norm.get("skills_required") or []
                 self.skills_preferred = norm.get("skills_preferred") or []
                 self.tech_stack = norm.get("tech_stack") or []
@@ -798,6 +811,16 @@ class Job(models.Model):
         if self.platform != "employer":
             from .ai_job_enrichment import reapply_ai_fields
             reapply_ai_fields(self)
+
+        self.skills_required = normalize_skill_list(self.skills_required)
+        self.seniority = resolve_seniority(seniority_at_start, self.title)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            fields = list(update_fields)
+            for name in ("skills_required", "seniority"):
+                if name not in fields:
+                    fields.append(name)
+            kwargs["update_fields"] = fields
 
         super().save(*args, **kwargs)
 

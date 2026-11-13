@@ -541,9 +541,11 @@ AI_FIELDS = [
 
 
 def _write_fields(job, result: dict[str, Any]) -> None:
+    from .skill_variants import normalize_skill_list
+
     job.responsibilities = _bullets(result["responsibilities"]) or job.responsibilities
     job.qualifications = _bullets(result["qualifications"]) or job.qualifications
-    job.skills_required = result["skills_required"]
+    job.skills_required = normalize_skill_list(result["skills_required"])
     job.skills_preferred = result["skills_preferred"]
     job.tech_stack = sorted(
         set(result["skills_required"]) | set(result["skills_preferred"]) | set(result["tools"]),
