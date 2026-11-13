@@ -225,6 +225,42 @@ class InternalMatchApiTests(TestCase):
     def _post(self, path, body):
         return self.client.post(path, body, format="json", **_headers())
 
+    def test_search_returns_filtered_matches_highest_first(self):
+        older = self._job(
+            "react-older",
+            title="React Engineer",
+            skills_required=["Python", "JavaScript"],
+            seniority="mid",
+            posted_at=self.now - timedelta(days=10),
+        )
+        newer = self._job(
+            "react-newer",
+            title="React Developer",
+            skills_required=["Python"],
+            seniority="junior",
+            posted_at=self.now,
+        )
+        self._job("accountant", title="Accountant", skills_required=["Python"], seniority="mid")
+        self._job("react-other-skill", title="React Designer", skills_required=["Go"], seniority="mid")
+
+        body = {
+            "userId": "user-1",
+            "profileVersion": "search-1",
+            "skills": ["Python"],
+            "seniority": "mid",
+            "yearsExperienceTotal": None,
+            "industryYears": {},
+            "languages": [],
+            "title": ["React"],
+            "limit": 10,
+        }
+        response = self._post("/internal/job-matches/search", body)
+        self.assertEqual(response.status_code, 200)
+        ids = [row["id"] for row in response.data]
+        self.assertCountEqual(ids, [older.id, newer.id])
+        self.assertGreater(response.data[0]["match_percent"], 0)
+        self.assertGreaterEqual(response.data[0]["match_percent"], response.data[1]["match_percent"])
+
     def test_rejects_missing_key(self):
         response = self.client.post("/internal/job-matches", _snapshot() | {"scope": "worldwide", "limit": 10}, format="json")
         self.assertEqual(response.status_code, 401)

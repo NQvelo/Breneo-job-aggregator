@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 
 from django.conf import settings
 from django.core.cache import cache
@@ -20,7 +21,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .match_candidates import candidate_jobs
+from .match_candidates import candidate_jobs, search_candidate_jobs
 from .match_score import SnapshotError, parse_snapshot, score_job
 from .models import Job
 
@@ -218,3 +219,77 @@ class JobMatchOneView(InternalMatchView):
         except Job.DoesNotExist:
             return Response({"error": "Job not found."}, status=404, headers=_NO_STORE)
         return Response(job_match_payload(job, score_job(job, snapshot), request), headers=_NO_STORE)
+
+
+def _text_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = value.split(",")
+    elif isinstance(value, list):
+        parts = value
+    else:
+        return []
+    return [str(item).strip() for item in parts if str(item).strip()]
+
+
+def _search_filters(body: dict) -> dict:
+    date_posted = body.get("datePosted", body.get("date_posted", "all"))
+    if not isinstance(date_posted, str):
+        date_posted = "all"
+    return {
+        "query": body.get("query") if isinstance(body.get("query"), str) else "",
+        "titles": _text_list(body.get("title", body.get("titles"))),
+        "cities": _text_list(body.get("city", body.get("cities"))),
+        "location_countries": _text_list(
+            body.get("locationCountry", body.get("location_country"))
+        ),
+        "work_modes": _text_list(body.get("workMode", body.get("work_mode"))),
+        "job_seniorities": _text_list(body.get("jobSeniority", body.get("job_seniority"))),
+        "role_categories": _text_list(body.get("roleCategory", body.get("role_category"))),
+        "companies": _text_list(body.get("companyNames", body.get("company_names"))),
+        "date_posted": date_posted.strip().lower() or "all",
+    }
+
+
+def _search_cache_key(user_id: str, profile_version: str, filters: dict, limit: int) -> str:
+    raw = json.dumps(
+        {"userId": user_id, "profileVersion": profile_version, "filters": filters, "limit": limit},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return "jobmatch:v2:search:" + hashlib.sha256(raw).hexdigest()
+
+
+@method_decorator(never_cache, name="dispatch")
+class JobMatchSearchView(InternalMatchView):
+    """Ranked matches for a search. Drops 0% and returns highest match first."""
+
+    @extend_schema(exclude=True)
+    def post(self, request):
+        try:
+            snapshot, body, snapshot_payload = _snapshot_and_body(request.data)
+            limit = _limit(body, snapshot_payload)
+        except SnapshotError as exc:
+            return Response({"error": str(exc)}, status=400, headers=_NO_STORE)
+        if limit > 300:
+            return Response({"error": "limit must be at most 300."}, status=400, headers=_NO_STORE)
+
+        filters = _search_filters(body if body is snapshot_payload else {**snapshot_payload, **body})
+        key = _search_cache_key(snapshot.user_id, snapshot.profile_version, filters, limit)
+        cached = cache.get(key)
+        if cached is not None:
+            return Response(cached, headers=_NO_STORE)
+
+        ranked = []
+        for job in search_candidate_jobs(snapshot.seniority, snapshot.skills, filters):
+            score = score_job(job, snapshot)
+            if score.match_percent <= 0:
+                continue
+            posted = job.posted_at
+            posted_key = posted.timestamp() if posted is not None else float("-inf")
+            ranked.append((score.match_percent, posted_key, job.id, job_match_payload(job, score, request)))
+        ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        payload = [item[3] for item in ranked[:limit]]
+        cache.set(key, payload, MATCH_CACHE_TTL_SECONDS)
+        return Response(payload, headers=_NO_STORE)

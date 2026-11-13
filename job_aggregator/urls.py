@@ -8,7 +8,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 from django.views.generic import TemplateView
 
-from jobs.internal_match_views import JobMatchOneView, JobMatchesView
+from jobs.internal_match_views import JobMatchOneView, JobMatchSearchView, JobMatchesView
 
 
 def health(request):
@@ -20,6 +20,8 @@ urlpatterns = [
     path("health/", health),
     path("internal/job-matches", JobMatchesView.as_view(), name="internal_job_matches"),
     path("internal/job-matches/", JobMatchesView.as_view(), name="internal_job_matches_slash"),
+    path("internal/job-matches/search", JobMatchSearchView.as_view(), name="internal_job_match_search"),
+    path("internal/job-matches/search/", JobMatchSearchView.as_view(), name="internal_job_match_search_slash"),
     path("internal/job-matches/one", JobMatchOneView.as_view(), name="internal_job_match_one"),
     path("internal/job-matches/one/", JobMatchOneView.as_view(), name="internal_job_match_one_slash"),
     path('', TemplateView.as_view(template_name='index.html'), name='home'),
