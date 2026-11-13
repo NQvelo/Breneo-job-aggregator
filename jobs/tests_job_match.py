@@ -38,6 +38,10 @@ def _snapshot(**overrides):
 class SkillAndScoreTests(TestCase):
     def test_variant_map_matches_the_app(self):
         self.assertEqual(normalize_skill_name("  JavaScript "), "javascript")
+        self.assertEqual(normalize_skill_name("Search Engine Optimization"), "seo")
+        self.assertEqual(normalize_skill_name("QuickBooks"), "quickbooks")
+        self.assertEqual(normalize_skill_name("Epic EMR"), "epic ehr")
+        self.assertEqual(normalize_skill_name("financial modelling"), "financial modeling")
         self.assertEqual(normalize_skill_name("Node.js"), "node.js")
         self.assertEqual(normalize_skill_name("JS"), "javascript")
         self.assertEqual(normalize_skill_name("nodejs"), "javascript")

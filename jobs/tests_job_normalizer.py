@@ -415,5 +415,86 @@ class TestParseStoredLocationFields(unittest.TestCase):
         self.assertEqual(parse_stored_location_fields("   "), (None, None))
 
 
+class TestRoleFamilySkills(unittest.TestCase):
+    def test_each_role_family_has_catalog_skills(self):
+        import json
+        from pathlib import Path
+
+        catalog = json.loads((Path(__file__).parent / "data" / "skills_catalog.json").read_text())
+        families = {
+            "Software engineering",
+            "DevOps & cloud",
+            "Data & AI",
+            "Design",
+            "Product & business analysis",
+            "Project & program management",
+            "Marketing",
+            "Sales & success",
+            "Finance & accounting",
+            "HR & recruiting",
+            "Customer support",
+            "Operations & admin",
+            "Healthcare",
+            "Education",
+            "Engineering & trades",
+            "Writing & media",
+            "Legal & compliance",
+            "Consulting & strategy",
+        }
+        present = {entry["category"] for entry in catalog}
+        self.assertTrue(families <= present)
+
+    def test_role_skills_are_extracted_and_not_ordinary_words(self):
+        marketing = extract_skills(
+            "Requirements: SEO, Google Analytics, HubSpot, and Google Ads.",
+            "Marketing Manager",
+        )
+        self.assertIn("SEO", marketing["required"])
+        self.assertIn("Google Analytics", marketing["required"])
+        self.assertIn("HubSpot", marketing["required"])
+
+        finance = extract_skills(
+            "Close the books in QuickBooks and NetSuite. GAAP reporting required.",
+            "Accountant",
+        )
+        self.assertIn("QuickBooks", finance["required"])
+        self.assertIn("NetSuite", finance["required"])
+        self.assertIn("GAAP", finance["required"])
+
+        legal = extract_skills(
+            "Contract drafting in Westlaw. GDPR and due diligence experience.",
+            "Counsel",
+        )
+        self.assertIn("Westlaw", legal["required"])
+        self.assertIn("Contract drafting", legal["required"])
+        self.assertIn("GDPR", legal["required"])
+        self.assertIn("Due diligence", legal["required"])
+
+        self.assertNotIn(
+            "Workday",
+            extract_skills("A typical workday starts at nine.", "Coordinator")["techStack"],
+        )
+        self.assertIn(
+            "Workday",
+            extract_skills("Experience with Workday and BambooHR.", "Recruiter")["techStack"],
+        )
+        self.assertNotIn(
+            "Gong",
+            extract_skills("Sound the gong when a deal closes.", "Account Executive")["techStack"],
+        )
+        self.assertIn(
+            "Gong",
+            extract_skills("We coach calls in Gong and track pipeline in Salesforce.", "Account Executive")["techStack"],
+        )
+        self.assertNotIn(
+            "Amplitude",
+            extract_skills("The signal amplitude stays within range.", "Electrical Engineer")["techStack"],
+        )
+        self.assertIn(
+            "Amplitude",
+            extract_skills("Product analytics in Amplitude and Mixpanel.", "Product Manager")["techStack"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

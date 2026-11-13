@@ -34,6 +34,7 @@ _WORD_SKILLS = frozenset({
     "Loki", "Mocha", "Notion", "Oracle", "Parcel", "Pinecone", "Prefect", "Presto", "Prettier",
     "Puppet", "REST", "Recoil", "Remix", "Ruby", "Rust", "Sinatra", "Sketch", "Slack", "Snowflake",
     "Spark", "Spring", "Swift", "Tornado",
+    "Amplitude", "Blackboard", "Gong", "Workday",
 })
 # Single-letter languages only count inside a list ("Python, R, SQL"), never in "R&D" or "C-level".
 _LETTER_SKILLS = frozenset({"R", "C"})
