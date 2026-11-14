@@ -129,6 +129,7 @@ class InterviewAttempt(models.Model):
     audio_file = models.FileField(
         upload_to="interview_records/",
         storage=interview_audio_storage,
+        blank=True,
     )
     transcript = models.TextField(blank=True, null=True)
     overall_score = models.IntegerField(default=0)

@@ -25,7 +25,7 @@ Do **not** use the cron command as the web service start command.
    - **Config-as-code path:** leave empty.
    - **Custom Start Command** (required — without it the `Procfile` starts Gunicorn and the run never exits):
      ```bash
-     python manage.py migrate --noinput && python manage.py fetch_jobs && python manage.py enrich_jobs_ai
+     python manage.py migrate --noinput && python manage.py fetch_jobs && python manage.py enrich_jobs_ai && python manage.py refresh_job_matches
      ```
    - **Cron Schedule:** `45 20 * * *` — every day at 20:45 UTC = **00:45 Georgia time (UTC+4)**.
    - **Restart Policy:** `Never` (a cron run must exit; it must not be restarted in a loop).
@@ -90,6 +90,10 @@ If a run is still active when the next one is due, Railway skips the new run.
      ~220 jobs a day and Gemini the rest. When both are used up the run stops and the remaining jobs
      are summarized on the next runs (the first backlog of several thousand jobs takes several days).
    - The run also stops after 10 failed calls in a row (bad key, removed model). `--force` regenerates everything.
+7. `refresh_job_matches` then re-ranks every stored user snapshot against today's catalog and **adds**
+   newly matching jobs to that user's list. Older matches stay. Users appear here after breneo-api has
+   called `POST /internal/job-matches` at least once (the snapshot is saved on that call). The list
+   endpoint itself also appends new jobs the first time it is called on a new Georgia calendar day.
 
 ---
 

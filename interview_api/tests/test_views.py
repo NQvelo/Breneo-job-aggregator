@@ -79,6 +79,24 @@ class InterviewAPITestCase(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Interview.objects.exists())
 
+    def test_transcribe_audio_uses_requested_language(self):
+        audio = BytesIO(b"fake-audio-bytes")
+        audio.name = "answer.webm"
+
+        with patch(
+            "interview_api.views.transcribe_audio",
+            return_value="გამარჯობა, ვმუშაობ React-ზე.",
+        ) as transcribe:
+            response = self.client.post(
+                "/api/v1/interview/transcribe/",
+                {"audio_file": audio, "language": "ka"},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["transcript"], "გამარჯობა, ვმუშაობ React-ზე.")
+        self.assertEqual(transcribe.call_args.kwargs["language"], "ka")
+
     def test_start_interview_accepts_role_slug(self):
         with patch(
             "interview_api.services.interview_service.synthesize_question_audio",
@@ -359,6 +377,102 @@ class InterviewAPITestCase(TestCase):
             response.data["question"]["question_text"],
             ROLE_QUESTIONS["backend"],
         )
+
+    def test_start_text_interview_skips_speech(self):
+        with (
+            patch(
+                "interview_api.services.interview_service.random.sample",
+                return_value=list(reversed(ROLE_QUESTIONS["react"][:MAX_INTERVIEW_QUESTIONS])),
+            ),
+            patch(
+                "interview_api.services.interview_service.synthesize_question_audio",
+                side_effect=_mock_tts,
+            ) as synthesize,
+        ):
+            response = self.client.post(
+                "/api/v1/interview/start/",
+                {"role": "react", "mode": "text"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        synthesize.assert_not_called()
+        self.assertIsNone(response.data["welcome_audio_url"])
+        self.assertIsNone(response.data["question"]["question_audio_url"])
+        self.assertFalse(response.data["playback"][0]["audio_url"])
+        self.assertGreaterEqual(len(response.data["questions"]), 1)
+
+    def test_submit_text_reviews_answer_without_audio(self):
+        planned = [
+            "აღწერეთ თქვენი ბოლო პროექტი.",
+            "რა არის REST API?",
+        ]
+        interview = Interview.objects.create(
+            user_id=self.user_id,
+            job_position="React Developer",
+            planned_questions=planned,
+        )
+        question = InterviewQuestion.objects.create(
+            interview=interview,
+            order=1,
+            question_text=planned[0],
+        )
+        evaluation = InterviewEvaluationResult.model_validate(
+            {
+                "overall_score": 80,
+                "status": "PASSED",
+                "requires_retake": False,
+                "user_transcript": "ვწერდი React კომპონენტებს.",
+                "metrics": {
+                    "technical_accuracy": {
+                        "score": 80,
+                        "label": "ტექნიკური სიზუსტე",
+                        "feedback": "კარგი.",
+                    },
+                    "structure_star": {
+                        "score": 78,
+                        "label": "პასუხის სტრუქტურა (STAR)",
+                        "feedback": "საშუალო.",
+                    },
+                    "delivery_confidence": {
+                        "score": 80,
+                        "label": "თვითპრეზენტაცია და ენა",
+                        "feedback": "კარგი.",
+                    },
+                },
+                "strengths": ["კონკრეტული მაგალითი"],
+                "improvements": ["დაამატე შედეგი"],
+                "missing_concepts": [],
+                "recommended_answer": "უფრო სრული პასუხი.",
+            }
+        )
+        with (
+            patch(
+                "interview_api.services.interview_service.evaluate_interview_answer",
+                return_value=evaluation,
+            ) as evaluate,
+            patch(
+                "interview_api.services.interview_service.synthesize_question_audio",
+                side_effect=_mock_tts,
+            ) as synthesize,
+        ):
+            response = self.client.post(
+                f"/api/v1/interview/submit-text/{question.id}/",
+                {"answer": "ვწერდი React კომპონენტებს."},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        evaluate.assert_called_once_with(planned[0], "ვწერდი React კომპონენტებს.")
+        synthesize.assert_not_called()
+        self.assertEqual(response.data["overall_score"], 80)
+        self.assertEqual(response.data["user_transcript"], "ვწერდი React კომპონენტებს.")
+        self.assertFalse(response.data["interview_complete"])
+        self.assertEqual(response.data["next_question"]["question_text"], planned[1])
+        self.assertIsNone(response.data["next_question"]["question_audio_url"])
+        attempt = question.attempts.get()
+        self.assertFalse(attempt.audio_file)
+        self.assertTrue(attempt.is_completed)
 
     @patch.dict("os.environ", {"EMPLOYER_POST_SECRET": "test-bff-secret"})
     def test_start_interview_via_bff_auth(self):

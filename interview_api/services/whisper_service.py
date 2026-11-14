@@ -51,10 +51,14 @@ def _guess_content_type(uploaded_file: UploadedFile, filename: str) -> str:
     return guessed or "application/octet-stream"
 
 
-def transcribe_audio(uploaded_file: UploadedFile) -> str:
-    """Transcribe an uploaded audio/video blob using Whisper (Georgian)."""
+def transcribe_audio(uploaded_file: UploadedFile, language: str = "ka") -> str:
+    """Transcribe an uploaded audio/video blob. Georgian (`ka`) is the default."""
     if uploaded_file is None:
         raise WhisperTranscriptionError("No audio file provided.")
+
+    lang = (language or "ka").strip().lower()
+    if lang not in {"ka", "en"}:
+        lang = "ka"
 
     url, api_key, model = _whisper_settings()
     timeout = int(os.environ.get("INTERVIEW_WHISPER_TIMEOUT_SECONDS", "120") or "120")
@@ -65,7 +69,7 @@ def transcribe_audio(uploaded_file: UploadedFile) -> str:
     files = {"file": (filename, uploaded_file, content_type)}
     data = {
         "model": model,
-        "language": "ka",
+        "language": lang,
         "response_format": "json",
     }
     headers = {"Authorization": f"Bearer {api_key}"}

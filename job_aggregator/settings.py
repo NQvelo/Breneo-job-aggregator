@@ -300,9 +300,8 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-# Server-side cache for internal job matches (userId + profileVersion + scope + limit, 15 min).
-# One gunicorn worker, so this process cache is shared by every device of an account.
-# The match endpoints send Cache-Control: no-store. The client cache is not the source of truth.
+# Server-side cache for internal job-match search (userId + profileVersion + filters + limit, 15 min).
+# Per-user match lists are stored in the database and refreshed daily by refresh_job_matches.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",

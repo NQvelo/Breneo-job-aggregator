@@ -26,6 +26,7 @@ class StartInterviewSerializer(serializers.Serializer):
     job_position = serializers.CharField(max_length=255, trim_whitespace=True, required=False, allow_blank=True)
     job_id = serializers.IntegerField(required=False, min_value=1)
     role = serializers.SlugField(max_length=64, required=False, allow_blank=True)
+    mode = serializers.ChoiceField(choices=["spoken", "text"], required=False, default="spoken")
 
     def validate(self, attrs):
         job_id = attrs.get("job_id")
@@ -171,6 +172,20 @@ class SubmitAudioSerializer(serializers.Serializer):
 
         attrs["uploaded_file"] = uploaded
         return attrs
+
+
+class TranscribeAudioSerializer(SubmitAudioSerializer):
+    language = serializers.ChoiceField(choices=["ka", "en"], required=False, default="ka")
+
+
+class SubmitTextSerializer(serializers.Serializer):
+    answer = serializers.CharField(max_length=8000, trim_whitespace=True)
+
+    def validate_answer(self, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise serializers.ValidationError("Answer text is required.")
+        return text
 
 
 class InterviewAttemptSerializer(serializers.ModelSerializer):

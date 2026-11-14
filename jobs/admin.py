@@ -1,7 +1,16 @@
 from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Job, Company, CompanyStaffMembership, Industry, JobApplication, JobApplicantCvView
+from .models import (
+    Job,
+    Company,
+    CompanyStaffMembership,
+    Industry,
+    JobApplication,
+    JobApplicantCvView,
+    UserJobMatch,
+    UserMatchSnapshot,
+)
 
 
 class JobAdminForm(forms.ModelForm):
@@ -12,6 +21,24 @@ class JobAdminForm(forms.ModelForm):
             "location": "City",
             "location_country": "Country",
         }
+
+
+@admin.register(UserMatchSnapshot)
+class UserMatchSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("user_id", "scope", "profile_version", "match_limit", "last_refreshed_at")
+    list_filter = ("scope",)
+    search_fields = ("user_id", "profile_version")
+    readonly_fields = ("created_at", "updated_at", "last_refreshed_at")
+
+
+@admin.register(UserJobMatch)
+class UserJobMatchAdmin(admin.ModelAdmin):
+    list_display = ("user_id", "scope", "job", "match_percent", "first_matched_at", "last_scored_at")
+    list_filter = ("scope",)
+    search_fields = ("user_id", "job__title", "job__company__name")
+    list_select_related = ("job", "job__company")
+    autocomplete_fields = ("job",)
+    readonly_fields = ("first_matched_at", "last_scored_at")
 
 
 @admin.register(JobApplication)

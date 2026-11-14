@@ -21,9 +21,10 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .match_candidates import candidate_jobs, search_candidate_jobs
+from .match_candidates import search_candidate_jobs
 from .match_score import SnapshotError, parse_snapshot, score_job
 from .models import Job
+from .user_match_store import matches_for_request, ranked_scored
 
 MATCH_CACHE_TTL_SECONDS = 15 * 60
 _NO_STORE = {"Cache-Control": "no-store"}
@@ -86,11 +87,6 @@ def _job_id(data, snapshot_payload):
     raise SnapshotError("jobId must be an integer")
 
 
-def _cache_key(user_id: str, profile_version: str, scope: str, limit: int) -> str:
-    raw = f"{user_id}\0{profile_version}\0{scope}\0{limit}".encode()
-    return "jobmatch:v2:" + hashlib.sha256(raw).hexdigest()
-
-
 _WORK_MODE_VALUES = {"remote", "hybrid", "on-site", "onsite", "on site", "unknown"}
 _EMPLOYMENT_KEYS = (
     "employment_type_note",
@@ -141,15 +137,10 @@ def job_match_payload(job, score, request=None) -> dict:
 
 
 def _ranked_jobs(scope: str, snapshot, limit: int, request=None) -> list[dict]:
-    jobs = list(candidate_jobs(scope, snapshot.seniority, snapshot.skills))
-    ranked = []
-    for job in jobs:
-        score = score_job(job, snapshot)
-        posted = job.posted_at
-        posted_key = posted.timestamp() if posted is not None else float("-inf")
-        ranked.append((score.match_percent, posted_key, job.id, job_match_payload(job, score, request)))
-    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-    return [item[3] for item in ranked[:limit]]
+    return [
+        job_match_payload(job, score, request)
+        for _percent, _posted, _job_id, job, score in ranked_scored(scope, snapshot, limit)
+    ]
 
 
 class InternalMatchView(APIView):
@@ -164,7 +155,7 @@ class InternalMatchView(APIView):
 
 @method_decorator(never_cache, name="dispatch")
 class JobMatchesView(InternalMatchView):
-    """Cached list of the top matches for one user snapshot and scope."""
+    """Stored matches for one user snapshot and scope. New jobs are appended once a day."""
 
     @extend_schema(exclude=True)
     def post(self, request):
@@ -175,13 +166,7 @@ class JobMatchesView(InternalMatchView):
         except SnapshotError as exc:
             return Response({"error": str(exc)}, status=400, headers=_NO_STORE)
 
-        key = _cache_key(snapshot.user_id, snapshot.profile_version, scope, limit)
-        cached = cache.get(key)
-        if cached is not None:
-            return Response(cached, headers=_NO_STORE)
-
-        payload = _ranked_jobs(scope, snapshot, limit, request)
-        cache.set(key, payload, MATCH_CACHE_TTL_SECONDS)
+        payload = matches_for_request(snapshot, scope, limit, request)
         return Response(payload, headers=_NO_STORE)
 
 

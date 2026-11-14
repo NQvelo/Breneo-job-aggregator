@@ -387,7 +387,7 @@ class InternalMatchApiTests(TestCase):
         self.assertEqual(georgia_ids, [georgia.id])
         self.assertEqual(world_ids, [world.id])
 
-    def test_server_cache_is_shared_and_the_single_job_is_fresh(self):
+    def test_same_day_keeps_stored_scores_until_profile_or_day_changes(self):
         job = self._job("cached", seniority="mid")
         body = {
             "userId": "user-1",
@@ -405,13 +405,38 @@ class InternalMatchApiTests(TestCase):
         Job.objects.filter(pk=job.id).update(seniority="senior")
         second = self._post("/internal/job-matches", body)
         self.assertEqual(second.data[0]["match_percent"], 80)
-        with CaptureQueriesContext(connection) as ctx:
-            self._post("/internal/job-matches", body)
-        self.assertEqual(ctx.captured_queries, [])
         single = self._post("/internal/job-matches/one", body | {"jobId": job.id})
         self.assertEqual(single.data["match_percent"], 67)
         bumped = self._post("/internal/job-matches", body | {"profileVersion": "v6"})
         self.assertEqual(bumped.data[0]["match_percent"], 67)
+
+    def test_daily_refresh_adds_new_jobs_and_keeps_old_matches(self):
+        from jobs.models import UserJobMatch
+        from jobs.user_match_store import refresh_all_stored_profiles
+
+        older = self._job("keep-me", seniority="mid", posted_at=self.now - timedelta(days=2))
+        body = {
+            "userId": "user-1",
+            "profileVersion": "daily",
+            "skills": ["Python"],
+            "seniority": "mid",
+            "yearsExperienceTotal": None,
+            "industryYears": {},
+            "languages": [],
+            "scope": "worldwide",
+            "limit": 1,
+        }
+        first = self._post("/internal/job-matches", body)
+        self.assertEqual([row["id"] for row in first.data], [older.id])
+
+        newer = self._job("new-today", seniority="mid", posted_at=self.now)
+        same_day = self._post("/internal/job-matches", body)
+        self.assertEqual([row["id"] for row in same_day.data], [older.id])
+
+        refresh_all_stored_profiles()
+        after_cron = self._post("/internal/job-matches", body)
+        self.assertEqual([row["id"] for row in after_cron.data], [newer.id, older.id])
+        self.assertEqual(UserJobMatch.objects.filter(user_id="user-1", scope="worldwide").count(), 2)
 
     def test_newer_post_wins_equal_scores(self):
         older = self._job("tie-old", posted_at=self.now - timedelta(days=2))
@@ -430,6 +455,7 @@ class InternalMatchApiTests(TestCase):
         response = self._post("/internal/job-matches", body)
         self.assertEqual([row["id"] for row in response.data], [newer.id, older.id])
 
-    def test_no_user_job_score_table(self):
+    def test_user_match_tables_exist(self):
         tables = set(connection.introspection.table_names())
-        self.assertFalse(any("match" in name and "user" in name for name in tables))
+        self.assertIn("jobs_usermatchsnapshot", tables)
+        self.assertIn("jobs_userjobmatch", tables)

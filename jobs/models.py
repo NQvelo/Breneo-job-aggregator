@@ -825,6 +825,57 @@ class Job(models.Model):
         super().save(*args, **kwargs)
 
 
+MATCH_SCOPE_CHOICES = [
+    ("georgia", "Georgia"),
+    ("worldwide", "Worldwide"),
+]
+
+
+class UserMatchSnapshot(models.Model):
+    """Last snapshot breneo-api sent for a user and scope. Used by the daily match refresh."""
+
+    user_id = models.CharField(max_length=255, db_index=True)
+    scope = models.CharField(max_length=16, choices=MATCH_SCOPE_CHOICES)
+    profile_version = models.CharField(max_length=255)
+    snapshot = models.JSONField()
+    match_limit = models.PositiveIntegerField(default=10)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user_id", "scope"], name="uniq_user_match_snapshot_scope"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.scope} {self.profile_version}"
+
+
+class UserJobMatch(models.Model):
+    """Accumulated per-user matches. Daily refresh adds new jobs and keeps older ones."""
+
+    user_id = models.CharField(max_length=255, db_index=True)
+    scope = models.CharField(max_length=16, choices=MATCH_SCOPE_CHOICES)
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="user_matches")
+    match_percent = models.PositiveSmallIntegerField()
+    skills_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+    experience_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+    industry_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+    first_matched_at = models.DateTimeField()
+    last_scored_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user_id", "scope", "job"], name="uniq_user_job_match"),
+        ]
+        indexes = [
+            models.Index(fields=["user_id", "scope"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.scope} job {self.job_id} ({self.match_percent}%)"
+
 
 # from django.db import models
 

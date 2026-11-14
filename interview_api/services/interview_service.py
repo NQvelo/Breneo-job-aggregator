@@ -127,10 +127,16 @@ class InterviewService:
         count = min(MAX_INTERVIEW_QUESTIONS, len(bank))
         return random.sample(bank, count)
 
-    def _next_question(self, interview: Interview, current_order: int) -> InterviewQuestion | None:
+    def _next_question(
+        self,
+        interview: Interview,
+        current_order: int,
+        *,
+        with_audio: bool = True,
+    ) -> InterviewQuestion | None:
         existing = interview.questions.filter(order=current_order + 1).first()
         if existing is not None:
-            return self._ensure_audio(existing)
+            return self._ensure_audio(existing) if with_audio else existing
 
         planned = list(interview.planned_questions or [])
         if current_order >= len(planned):
@@ -139,7 +145,7 @@ class InterviewService:
             interview=interview,
             order=current_order + 1,
             question_text=planned[current_order],
-            with_audio=True,
+            with_audio=with_audio,
         )
 
     def _welcome_for(self, *, job, position: str, question_count: int) -> str:
@@ -157,6 +163,7 @@ class InterviewService:
         job_position: str,
         job=None,
         role_slug: str = "",
+        spoken: bool = True,
     ) -> tuple[Interview, InterviewQuestion]:
         role = resolve_interview_role(
             role_slug=role_slug,
@@ -170,12 +177,14 @@ class InterviewService:
             position=position,
             question_count=len(selected),
         )
-        # Speech for the welcome and the first bank question runs together.
-        # Later questions stay text-only until the candidate reaches them.
-        welcome_name, first_audio_name = self._speech_names(welcome_text, selected[0])
-
-        if not welcome_name or not first_audio_name:
-            raise TTSServiceError("Welcome audio could not be saved.")
+        welcome_name = ""
+        first_audio_name = ""
+        if spoken:
+            # Speech for the welcome and the first bank question runs together.
+            # Later questions stay text-only until the candidate reaches them.
+            welcome_name, first_audio_name = self._speech_names(welcome_text, selected[0])
+            if not welcome_name or not first_audio_name:
+                raise TTSServiceError("Welcome audio could not be saved.")
 
         interview = Interview.objects.create(
             user_id=user_id.strip(),
@@ -185,16 +194,17 @@ class InterviewService:
             planned_questions=selected,
             welcome_text=welcome_text,
         )
-        interview.welcome_audio.name = welcome_name
-        interview.save(update_fields=["welcome_audio"])
+        if welcome_name:
+            interview.welcome_audio.name = welcome_name
+            interview.save(update_fields=["welcome_audio"])
         first_question = None
         for order, question_text in enumerate(selected, start=1):
             question = self._create_spoken_question(
                 interview=interview,
                 order=order,
                 question_text=question_text,
-                with_audio=order == 1,
-                audio_name=first_audio_name if order == 1 else "",
+                with_audio=spoken and order == 1,
+                audio_name=first_audio_name if spoken and order == 1 else "",
             )
             if order == 1:
                 first_question = question
@@ -254,6 +264,60 @@ class InterviewService:
         question_number = question.order
         next_question = self._next_question(interview, question_number)
 
+        return SubmitAudioResult(
+            evaluation=evaluation,
+            question_number=question_number,
+            total_questions=self._session_length(interview),
+            interview_complete=next_question is None,
+            next_question=next_question,
+        )
+
+    @transaction.atomic
+    def submit_text(self, *, question: InterviewQuestion, answer: str) -> SubmitAudioResult:
+        text = answer.strip()
+        if not text:
+            raise InterviewAPIError("Answer text is required.", status_code=400)
+
+        attempt = InterviewAttempt.objects.create(
+            question=question,
+            is_completed=False,
+        )
+        try:
+            evaluation = evaluate_interview_answer(question.question_text, text)
+        except InterviewAPIError:
+            attempt.delete()
+            raise
+
+        attempt.transcript = evaluation.user_transcript
+        attempt.overall_score = evaluation.overall_score
+        attempt.metrics = evaluation.metrics.model_dump()
+        attempt.strengths = evaluation.strengths
+        attempt.improvements = evaluation.improvements
+        attempt.missing_concepts = evaluation.missing_concepts
+        attempt.recommended_answer = evaluation.recommended_answer
+        attempt.is_completed = True
+        attempt.save(
+            update_fields=[
+                "transcript",
+                "overall_score",
+                "metrics",
+                "strengths",
+                "improvements",
+                "missing_concepts",
+                "recommended_answer",
+                "is_completed",
+            ]
+        )
+
+        interview = Interview.objects.select_related("job", "job__company", "role").get(
+            pk=question.interview_id
+        )
+        question_number = question.order
+        next_question = self._next_question(
+            interview,
+            question_number,
+            with_audio=False,
+        )
         return SubmitAudioResult(
             evaluation=evaluation,
             question_number=question_number,
