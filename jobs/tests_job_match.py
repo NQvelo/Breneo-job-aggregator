@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from jobs.match_score import parse_snapshot, score_job
-from jobs.models import Company, Job
+from jobs.models import Company, Job, JobApplication
 from jobs.skill_variants import normalize_skill_name, normalize_skill_list
 
 INTERNAL_KEY = "test-internal-key"
@@ -459,3 +459,61 @@ class InternalMatchApiTests(TestCase):
         tables = set(connection.introspection.table_names())
         self.assertIn("jobs_usermatchsnapshot", tables)
         self.assertIn("jobs_userjobmatch", tables)
+
+    def test_applied_job_is_omitted_from_list_and_search(self):
+        listed = self._job("keep-open", seniority="mid")
+        applied = self._job("already-applied", seniority="mid")
+        JobApplication.objects.create(
+            external_user_id="user-1",
+            job=applied,
+            applied_at=self.now,
+        )
+        body = {
+            "userId": "user-1",
+            "profileVersion": "applied-hide",
+            "skills": ["Python"],
+            "seniority": "mid",
+            "yearsExperienceTotal": None,
+            "industryYears": {},
+            "languages": [],
+            "scope": "worldwide",
+            "limit": 10,
+        }
+        listed_ids = [row["id"] for row in self._post("/internal/job-matches", body).data]
+        self.assertEqual(listed_ids, [listed.id])
+        self.assertNotIn(applied.id, listed_ids)
+
+        search = self._post(
+            "/internal/job-matches/search",
+            body | {"title": ["Engineer"], "limit": 10},
+        )
+        search_ids = [row["id"] for row in search.data]
+        self.assertIn(listed.id, search_ids)
+        self.assertNotIn(applied.id, search_ids)
+
+        other_user = self._post("/internal/job-matches", body | {"userId": "user-2", "profileVersion": "other"})
+        other_ids = [row["id"] for row in other_user.data]
+        self.assertIn(applied.id, other_ids)
+
+    def test_same_day_list_drops_a_job_after_the_user_applies(self):
+        job = self._job("apply-then-hide", seniority="mid")
+        body = {
+            "userId": "user-1",
+            "profileVersion": "after-apply",
+            "skills": ["Python"],
+            "seniority": "mid",
+            "yearsExperienceTotal": None,
+            "industryYears": {},
+            "languages": [],
+            "scope": "worldwide",
+            "limit": 10,
+        }
+        first = self._post("/internal/job-matches", body)
+        self.assertEqual([row["id"] for row in first.data], [job.id])
+        JobApplication.objects.create(
+            external_user_id="user-1",
+            job=job,
+            applied_at=self.now,
+        )
+        after = self._post("/internal/job-matches", body)
+        self.assertEqual([row["id"] for row in after.data], [])

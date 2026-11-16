@@ -127,3 +127,12 @@ class JobSearchTwoCountriesTests(TestCase):
         results = response.data.get("results", [])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["title"], "Developer in UK")
+
+    def test_exclude_job_ids_omits_applied_listings(self):
+        url = reverse("job_search")
+        response = self.client.get(url, {"exclude_job_ids": str(self.job_us.id)})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        titles = {row["title"] for row in response.data.get("results", [])}
+        self.assertNotIn("Engineer in US", titles)
+        self.assertIn("Developer in UK", titles)
+        self.assertIn("Dev in France", titles)

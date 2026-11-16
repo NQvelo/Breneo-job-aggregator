@@ -15,6 +15,7 @@ from ..application_exceptions import (
     JobNotFoundError,
 )
 from ..applicant_profile import ApplicantProfile, enrich_applicant_profile
+from ..applied_jobs import bump_applied_jobs_version
 from ..job_apply_eligibility import job_supports_in_app_apply
 from ..models import CompanyStaffMembership, JobApplication
 from ..repositories.job_applications import JobApplicationRepository
@@ -45,20 +46,24 @@ class JobApplicationService:
         if existing:
             if existing.withdrawn_at is None:
                 raise AlreadyAppliedError("You have already applied to this job.")
-            return self.repo.reactivate(existing, profile)
+            application = self.repo.reactivate(existing, profile)
+            bump_applied_jobs_version(user_id)
+            return application
 
         try:
             application = self.repo.create_application(profile, job)
+            bump_applied_jobs_version(user_id)
             logger.info("User %s applied to job %s", user_id, job_id)
             return application
         except IntegrityError:
             raise AlreadyAppliedError("You have already applied to this job.") from None
 
-    def withdraw(self, user_id: str, job_id: int) -> JobApplication:
+    def withdraw(self, user_id: int, job_id: int) -> JobApplication:
         application = self.repo.get_active_application(user_id, job_id)
         if not application:
             raise ApplicationNotFoundError("No active application found for this job.")
         withdrawn = self.repo.withdraw(application)
+        bump_applied_jobs_version(user_id)
         logger.info("User %s withdrew application for job %s", user_id, job_id)
         return withdrawn
 

@@ -22,6 +22,7 @@ from .location_resolver import (
     q_for_place_param,
 )
 from .match_score import SENIORITY_RANK
+from .applied_jobs import active_applied_job_ids
 from .models import Job
 from .query_parser import parse_query_to_search_params
 
@@ -80,12 +81,23 @@ def _with_shared_skill(qs, skills: list[str]):
     ).filter(_shared_skill=True)
 
 
-def candidate_jobs(scope: str, user_seniority: str, user_skills: list[str]):
+def _exclude_applied(qs, user_id: str | None):
+    applied = active_applied_job_ids(user_id)
+    return qs.exclude(id__in=applied) if applied else qs
+
+
+def candidate_jobs(
+    scope: str,
+    user_seniority: str,
+    user_skills: list[str],
+    user_id: str | None = None,
+):
     """
     Active jobs in scope, capped at 300, newest posted first.
 
     Seniority: within one level of the user, or null. Skipped when the user
     seniority is unknown. Skill overlap is required when the user has skills.
+    Jobs the user has already applied to are omitted.
     """
     if scope == "georgia":
         qs = Job.objects.filter(georgia_country_jobs_q())
@@ -93,7 +105,7 @@ def candidate_jobs(scope: str, user_seniority: str, user_skills: list[str]):
         qs = Job.objects.exclude(georgia_country_jobs_q())
     else:
         raise ValueError("scope must be georgia or worldwide")
-    qs = qs.filter(is_active=True)
+    qs = _exclude_applied(qs.filter(is_active=True), user_id)
     window = seniority_window(user_seniority)
     if window is not None:
         qs = qs.filter(
@@ -211,10 +223,16 @@ def apply_search_filters(qs, filters: dict):
     return qs
 
 
-def search_candidate_jobs(user_seniority: str, user_skills: list[str], filters: dict):
+def search_candidate_jobs(
+    user_seniority: str,
+    user_skills: list[str],
+    filters: dict,
+    user_id: str | None = None,
+):
     """
     Active jobs in both scopes that match the search filters and the user's
     skill and seniority window. Each scope is capped at 300, then scored by the caller.
+    Jobs the user has already applied to are omitted.
     """
     seen = set()
     jobs = []
@@ -223,7 +241,7 @@ def search_candidate_jobs(user_seniority: str, user_skills: list[str], filters: 
             qs = Job.objects.filter(georgia_country_jobs_q())
         else:
             qs = Job.objects.exclude(georgia_country_jobs_q())
-        qs = apply_search_filters(qs.filter(is_active=True), filters)
+        qs = apply_search_filters(_exclude_applied(qs.filter(is_active=True), user_id), filters)
         qs = _apply_match_window(qs, user_seniority, user_skills)
         for job in _card_page(qs):
             if job.id in seen:

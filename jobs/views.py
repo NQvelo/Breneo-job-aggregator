@@ -17,6 +17,7 @@ from django.utils import timezone
 from datetime import timedelta
 from urllib.parse import unquote
 import base64
+from .applied_jobs import parse_exclude_job_ids
 from .models import Company, Job, visible_jobs_q
 from .serializers import (
     CompanyJobsSerializer,
@@ -127,6 +128,7 @@ class JobSearchView(APIView):
     - company: One or more company names, comma-separated (e.g. company=Stripe,Airbnb)
     - date_posted: 'all', 'today', 'week', 'month' (optional, default: 'all')
     - recent: 'true' to show only jobs fetched in last 24 hours (optional)
+    - exclude_job_ids: job ids to omit (comma-separated); used for jobs the caller already applied to
     - sort: 'newest', 'oldest', 'recently_fetched' (optional, default: 'newest')
     - offset, limit OR page, num_pages: pagination
     """
@@ -151,6 +153,9 @@ class JobSearchView(APIView):
         work_modes = _get_multi_value_param(request, 'work_mode')
         seniorities = _get_multi_value_param(request, 'seniority')
         company_names = _get_multi_value_param(request, 'company')
+        exclude_job_ids = parse_exclude_job_ids(
+            _get_multi_value_param(request, "exclude_job_ids")
+        )
         
         # Handle pagination - support both offset/limit and page/num_pages
         try:
@@ -291,6 +296,9 @@ class JobSearchView(APIView):
             now = timezone.now()
             recent_threshold = now - timedelta(hours=24)
             jobs = jobs.filter(fetched_at__gte=recent_threshold)
+
+        if exclude_job_ids:
+            jobs = jobs.exclude(id__in=exclude_job_ids)
         
         # Sort jobs
         if sort_order == 'recently_fetched':

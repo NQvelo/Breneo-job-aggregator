@@ -21,6 +21,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .applied_jobs import applied_jobs_version
 from .match_candidates import search_candidate_jobs
 from .match_score import SnapshotError, parse_snapshot, score_job
 from .models import Job
@@ -239,7 +240,13 @@ def _search_filters(body: dict) -> dict:
 
 def _search_cache_key(user_id: str, profile_version: str, filters: dict, limit: int) -> str:
     raw = json.dumps(
-        {"userId": user_id, "profileVersion": profile_version, "filters": filters, "limit": limit},
+        {
+            "userId": user_id,
+            "profileVersion": profile_version,
+            "filters": filters,
+            "limit": limit,
+            "appliedVersion": applied_jobs_version(user_id),
+        },
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
@@ -267,7 +274,9 @@ class JobMatchSearchView(InternalMatchView):
             return Response(cached, headers=_NO_STORE)
 
         ranked = []
-        for job in search_candidate_jobs(snapshot.seniority, snapshot.skills, filters):
+        for job in search_candidate_jobs(
+            snapshot.seniority, snapshot.skills, filters, snapshot.user_id
+        ):
             score = score_job(job, snapshot)
             if score.match_percent <= 0:
                 continue

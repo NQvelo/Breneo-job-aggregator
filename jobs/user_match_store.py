@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from django.utils import timezone
 
+from .applied_jobs import active_applied_job_ids
 from .match_candidates import _CARD_FIELDS, candidate_jobs
 from .match_score import MatchScore, UserSnapshot, parse_snapshot, score_job
 from .models import JOB_DEADLINE_TZ, Job, UserJobMatch, UserMatchSnapshot, visible_jobs_q
@@ -32,7 +33,9 @@ def georgia_date(when=None):
 
 
 def ranked_scored(scope: str, snapshot: UserSnapshot, limit: int):
-    jobs = list(candidate_jobs(scope, snapshot.seniority, snapshot.skills))
+    jobs = list(
+        candidate_jobs(scope, snapshot.seniority, snapshot.skills, snapshot.user_id)
+    )
     ranked = []
     for job in jobs:
         score = score_job(job, snapshot)
@@ -124,11 +127,15 @@ def stored_payloads(user_id: str, scope: str, request=None) -> list[dict]:
         "job_id",
         *[f"job__{field}" for field in _CARD_FIELDS],
     ]
+    applied = active_applied_job_ids(user_id)
+    visible = Job.objects.filter(visible_jobs_q())
+    if applied:
+        visible = visible.exclude(id__in=applied)
     rows = (
         UserJobMatch.objects.filter(
             user_id=user_id,
             scope=scope,
-            job_id__in=Job.objects.filter(visible_jobs_q()).values("id"),
+            job_id__in=visible.values("id"),
         )
         .select_related("job", "job__company")
         .only(*only_fields)
